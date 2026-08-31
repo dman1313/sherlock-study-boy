@@ -1,0 +1,25 @@
+# Authentication and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+storage_state.json
+.notebooklm-mcp-cli/
+notebooklm_browser_profile/
+
+# Generated or private content
+study-packages/
+output/
+*.mp4
+*.m4a
+*.pdf
+*.pptx
+
+# Python and editors
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+.vscode/
+.idea/
