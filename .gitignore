@@ -11,6 +11,7 @@ notebooklm_browser_profile/
 # Generated or private content
 study-packages/
 output/
+progress.json
 *.mp4
 *.m4a
 *.pdf
