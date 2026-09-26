@@ -1,7 +1,7 @@
 # Sherlock Study Boy — Repair and Adaptive Modes
 
 - **Date:** 2026-09-26
-- **Status:** Design approved section by section; awaiting written-spec review
+- **Status:** Approved. Implementation plan: `docs/superpowers/plans/2026-09-26-sherlock-v2-implementation.md` (where the plan differs from this spec, the plan wins; §11 lists the differences)
 - **Releases:** v2.0.1 (Milestone 1), v2.1.0 (Milestone 2)
 
 ## 1. Summary
@@ -56,16 +56,16 @@ Finish Sherlock Study Boy as a working agent skill in two milestones:
 
 ```yaml
 name: sherlock-study-boy
-description: Turn curriculum into NotebookLM study media and tutoring.
+description: Turn curriculum files into NotebookLM study media.
 version: 2.0.1
 author: Dwayne Primeau, Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
 ```
 
-The description must stay ≤ 60 characters and end with a period (validator rule). Trigger phrases belong in the body's "When to Use" section.
+This is v1's description unchanged. Milestone 2 changes it to `Turn curriculum into NotebookLM study media and tutoring.` The description must stay ≤ 60 characters and end with a period (validator rule). Trigger phrases belong in the body's "When to Use" section.
 
-**R1.2 Fix the validator's file scan.** `validate_skill.py` scans only files tracked by git (`git ls-files -z`). When the directory is not a git checkout (for example, a copy installed by `npx skills add`), fall back to walking the tree while skipping `.git/`, `__pycache__/`, and files that are not valid UTF-8. Add a regression test that creates a `__pycache__` file containing a machine-specific path and asserts the validator still passes.
+**R1.2 Fix the validator's file scan.** `validate_skill.py` scans only files git would commit: tracked files plus untracked files that `.gitignore` does not exclude (`git ls-files -z --cached --others --exclude-standard`), so new files are checked before they are staged. When the directory is not a git checkout (for example, a copy installed by `npx skills add`), fall back to walking the tree while skipping `.git/`, `__pycache__/`, and files that are not valid UTF-8. Add a regression test that creates a `__pycache__` file containing a machine-specific path and asserts the validator still passes.
 
 **R1.3 Make version checks self-maintaining.** Replace the hard-coded `"1.0.0"` assertion with a test that the frontmatter `version` equals the newest version heading in `CHANGELOG.md`.
 
@@ -95,7 +95,8 @@ Everything lives under the study package directory from v1 Step 1 (default `./st
 ├── manifest.json, curriculum-analysis.md, … (v1 package files)
 ├── quiz-bank/
 │   ├── bank.json                      # shared by every student of this notebook
-│   └── <concept>-d<difficulty>-<n>.json   # normalized quiz, one per NotebookLM quiz artifact
+│   ├── <concept>-d<difficulty>-<n>.json   # normalized quiz, one per NotebookLM quiz artifact
+│   └── downloads/                     # raw `nlm download quiz` output before import
 └── students/
     └── <student-id>.json              # one progress file per student
 ```
@@ -104,7 +105,7 @@ Everything lives under the study package directory from v1 Step 1 (default `./st
 
 ### 6.2 `scripts/sherlock.py` interface
 
-- Python 3.10+, standard library only, single file.
+- Python 3.9+ (the macOS system `python3` is 3.9; CI tests 3.10 and 3.12), standard library only, single file.
 - Every command takes `--dir <pkg>`. Every command accepts `--today YYYY-MM-DD` (default: local date) so date logic is testable.
 - Every command prints one JSON object to stdout. Errors print a one-line message to stderr and exit `1` (bad input or refused action) or `2` (unreadable data or unknown `schema_version`).
 - All writes are atomic: write to a temporary file in the same directory, `fsync`, then `os.replace`.
@@ -112,16 +113,16 @@ Everything lives under the study package directory from v1 Step 1 (default `./st
 | Command | Purpose |
 |---|---|
 | `bank init --notebook-id <id> [--daily-cap 20]` | Create `quiz-bank/bank.json`. |
-| `bank concept add --slug <slug> --name <name> --focus <phrase> --rank <n>` | Register a concept. Refuses a focus phrase longer than 5 words or a duplicate slug. |
+| `bank add-concept --slug <slug> --name <name> --focus <phrase> --rank <n>` | Register a concept. Refuses a focus phrase longer than 5 words or a duplicate slug. |
 | `bank quota` | Report `used_today`, `cap`, `remaining`. |
-| `bank request --concept <slug> --difficulty <1-5> [--count 8]` | Reserve a quiz slot and count it against today's cap; refuses when the cap is reached. Prints the slot name and the exact `nlm quiz create` command to run, built from the concept's stored focus phrase, so the agent never composes focus or difficulty flags by hand. |
+| `bank request --concept <slug> --difficulty <1-5> [--count 8]` | Reserve a quiz slot and count it against today's cap; refuses when the cap is reached, or when the concept already has 3 requests today. Prints the slot name and the exact `nlm quiz create` command to run, built from the concept's stored focus phrase, so the agent never composes focus or difficulty flags by hand. |
 | `bank submitted --quiz <slot> --artifact-id <id>` | Mark the slot `pending` with its NotebookLM artifact ID. |
 | `bank pending` | List pending slots with artifact IDs and minutes since submission, for polling. |
 | `bank import --quiz <slot> --file <downloaded.json>` | Validate and normalize a downloaded quiz into the bank; mark `ready`, or `failed` if validation fails. |
 | `bank fail --quiz <slot> --reason <text>` | Mark a slot `failed` (generation failed, timed out, or submission errored). |
 | `student new [--nickname <nick>]` | Create a student file with every bank concept `untested`. Without a nickname, generate `s-` plus 6 random hex characters. Nicknames must match `^[a-z0-9][a-z0-9-]{2,31}$`. |
 | `next --student <id> --concept <slug> --count <n> --mode <mode>` | Select questions (§6.4). Prints question IDs, text, and options, plus `unseen_remaining`. Never prints correct answers. |
-| `record --student <id> --concept <slug> --mode <mode> --question <qid> --choice <index>` | Grade one answer against the stored answer key; update `seen`. Prints `correct`, the correct option, and the rationale if the quiz has one. |
+| `record --student <id> --concept <slug> --mode <mode> --question <qid> --choice <index>` | Grade one answer against the stored answer key; update `seen`. Prints `correct`, `correct_index`, `correct_option`, `rationale` (or null), and `answered_this_round`. |
 | `close-round --student <id> --concept <slug> --mode <mode>` | Score the answers recorded since the last round for this concept and mode; apply §6.4 transitions. Prints the new status and next review date. |
 | `note --student <id> --concept <slug> (--misconception <text> \| --explanation <tag>)` | Append a one-line misconception (≤ 120 characters) or an explanation-strategy tag. |
 | `status --student <id>` | Per concept: status, score, next review, unseen questions available, teach rounds today; plus the teach queue in order. |
@@ -146,17 +147,20 @@ Everything lives under the study package directory from v1 Step 1 (default `./st
       "slot": "photosynthesis-d3-1",
       "concept": "photosynthesis",
       "difficulty": 3,
+      "count": 8,
       "status": "reserved | pending | ready | failed",
       "artifact_id": "<artifact-id or null>",
-      "requested": "2026-09-26T10:02:00+08:00",
+      "requested": "2026-09-26",
+      "submitted_at": "2026-09-26T02:02:00+00:00",
       "file": "quiz-bank/photosynthesis-d3-1.json",
+      "question_count": 8,
       "reason": null
     }
   ]
 }
 ```
 
-Today's quota usage is the count of `quizzes` whose `requested` date is today, in any status. Quota is per Google account, so it is shared across students.
+Today's quota usage is the count of `quizzes` whose `requested` date is today, in any status (a failed request may still have used NotebookLM quota). Quota is per Google account, so it is shared across students.
 
 **Normalized quiz file** (`quiz-bank/<slot>.json`), written by `bank import`:
 
@@ -273,7 +277,7 @@ Every session begins with `nlm login --check` and `sherlock.py status`. Authenti
 | Quiz still generating when needed | Use remaining unseen questions; otherwise move to another concept and return later. Tell the student what is happening. |
 | `unknown` status | Keep polling up to 10 minutes from submission before `bank fail`; never submit a duplicate while one is pending. |
 | `failed` status | Retry once immediately with a new `bank request`; on a second failure, skip the concept for today. |
-| Rate limited (`code 8`) | Wait 5 minutes; at most 3 submissions per concept per day. |
+| Rate limited (`code 8`) | `bank fail`, wait 5 minutes, then request again; the script allows at most 3 requests per concept per day. |
 | Invalid or empty quiz file | `bank import` marks the slot `failed`; its questions are never shown. |
 | Daily cap reached | `bank request` refuses; the agent continues with existing bank questions and says so. |
 | Unknown `schema_version` | Exit 2; the agent reports the error and does not edit the file. |
@@ -312,7 +316,7 @@ Offline, standard-library `unittest`, run in CI on Python 3.10 and 3.12. No test
 - **Robustness:** unknown `schema_version` exits 2; a failure between temp-write and replace leaves the original file intact.
 - **Validator:** the `__pycache__` regression test from R1.2; frontmatter version matches the CHANGELOG.
 
-**Fixture:** Plan task 1 generates one real NotebookLM quiz (one generation of quota, with the user's approval), downloads it as JSON, removes notebook and artifact IDs, and commits it as `tests/fixtures/quiz-sample.json`. `bank import`'s normalizer is written against this real file.
+**Fixture:** The quiz JSON shape was confirmed by reading `notebooklm_tools/core/download.py` in `nlm` 0.9.14: `{"title", "questions": [{"question", "answerOptions": [{"text", "isCorrect"}], "hint"}]}`. `tests/fixtures/quiz-sample.json` is hand-written in exactly that shape, so no quota is spent on fixtures. The live run (§8 item 3) imports a real download and stops if the shape has changed.
 
 ## 8. Definition of done
 
@@ -323,7 +327,7 @@ Offline, standard-library `unittest`, run in CI on Python 3.10 and 3.12. No test
 
 ## 9. Assumptions and open items
 
-- **Quiz JSON shape (resolved by plan task 1).** The design assumes NotebookLM's quiz JSON contains, per question, the question text, options, and an identifiable correct answer. If it lacks a machine-readable correct answer, grading falls back to the agent comparing the choice against the quiz's rationale text. That changes `record`, so it would be raised with the user before continuing.
+- **Quiz JSON shape (resolved).** `nlm` 0.9.14's source shows each answer option carries `isCorrect`, so grading is exact. A per-option `rationale` may be passed through from NotebookLM but is not guaranteed; `record` returns it when present and `null` otherwise.
 - **Queries also cost quota.** On the free tier (~50/day), `nlm notebook query` calls count too. The daily cap covers generations only; `SKILL.md` tells the agent to prefer package files over queries in teach and tutor.
 - **Focused-quiz reliability.** `--focus` has known silent failures for long phrases; the 5-word limit mitigates this. `--source-ids` is available as a later refinement if focus proves unreliable, and is out of scope for v2.1.0.
 
@@ -332,3 +336,15 @@ Offline, standard-library `unittest`, run in CI on Python 3.10 and 3.12. No test
 - NotebookLM's private endpoints can change without notice, breaking `nlm`. Mitigation: pin guidance to a tested `nlm` version and keep the offline suite independent of it.
 - A student waits while the first bank fills. Mitigation: rolling start (§6.5 Diagnose step 4).
 - The Hermes install diverges again. Mitigation: R1.7.
+
+## 11. Changes made during implementation planning
+
+Planning ran every code block before writing it into the plan. That surfaced these refinements, all reflected above:
+
+- The concept command is `bank add-concept` (flat), not `bank concept add`.
+- `bank request` also refuses a fourth request for the same concept on the same day, enforcing §6.6's rate-limit rule in code.
+- Bank quiz entries record `requested` (date, used for quota) separately from `submitted_at` (timestamp, used for `bank pending`'s `minutes_pending`), plus `count` and `question_count`.
+- The quiz JSON shape was confirmed from `nlm` source, so fixtures are hand-written and the real-format check moves to the live run.
+- The validator scans untracked-but-not-ignored files too, so new files are checked before they are staged.
+- v2.0.1 keeps v1's frontmatter description; v2.1.0 adds "and tutoring".
+- The script targets Python 3.9+ because the macOS system `python3` is 3.9.
