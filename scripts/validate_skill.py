@@ -41,6 +41,8 @@ REQUIRED_SNIPPETS = [
     "nlm download video <notebook-id> --id <artifact-id>",
     "references/privacy-and-safety.md",
     "references/nlm-cli-quirks.md",
+    "references/adaptive-learning.md",
+    "scripts/sherlock.py",
 ]
 
 
