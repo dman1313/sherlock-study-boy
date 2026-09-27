@@ -670,6 +670,99 @@ def cmd_note(args: argparse.Namespace) -> dict:
     }
 
 
+# --- Status and review -------------------------------------------------------
+
+
+def concept_rows(pkg: Path, bank: dict, student: dict, today: dt.date) -> list:
+    rows = []
+    for slug, meta in sorted(bank["concepts"].items(), key=lambda item: item[1]["rank"]):
+        record = student["concepts"].get(slug) or new_concept_record()
+        unseen = sum(
+            1 for _, q in ready_questions(pkg, bank, slug) if q["id"] not in record["seen"]
+        )
+        rows.append(
+            {
+                "concept": slug,
+                "name": meta["name"],
+                "rank": meta["rank"],
+                "status": record["status"],
+                "score": record["score"],
+                "step": record["step"],
+                "next_review": record["next_review"],
+                "unseen_questions": unseen,
+                "teach_rounds_today": sum(
+                    1
+                    for r in record["rounds"]
+                    if r["mode"] == "teach" and r["date"] == today.isoformat()
+                ),
+                "quizzes_pending": sum(
+                    1
+                    for quiz in bank["quizzes"]
+                    if quiz["concept"] == slug and quiz["status"] in ("reserved", "pending")
+                ),
+                "misconceptions": record["misconceptions"],
+            }
+        )
+    return rows
+
+
+
+def cmd_status(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    today = today_from(args)
+    bank = load_json(bank_file(pkg))
+    student = load_student(pkg, args.student)
+    rows = concept_rows(pkg, bank, student, today)
+    teachable = [
+        r
+        for r in rows
+        if r["status"] in ("weak", "partial")
+        and r["teach_rounds_today"] < MAX_TEACH_ROUNDS_PER_DAY
+    ]
+    teachable.sort(
+        key=lambda r: (
+            0 if r["status"] == "weak" else 1,
+            r["score"] if r["score"] is not None else 0.0,
+            r["rank"],
+        )
+    )
+    return {
+        "student": args.student,
+        "notebook_id": bank["notebook_id"],
+        "today": today.isoformat(),
+        "concepts": rows,
+        "teach_queue": [r["concept"] for r in teachable],
+        "due": [
+            r["concept"]
+            for r in rows
+            if r["next_review"] is not None and r["next_review"] <= today.isoformat()
+        ],
+        "quota": quota(bank, today),
+    }
+
+
+
+def cmd_due(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    today = today_from(args)
+    bank = load_json(bank_file(pkg))
+    student = load_student(pkg, args.student)
+    rows = [
+        r
+        for r in concept_rows(pkg, bank, student, today)
+        if r["next_review"] is not None and r["next_review"] <= today.isoformat()
+    ]
+    rows.sort(key=lambda r: (r["next_review"], r["rank"]))
+    return {
+        "student": args.student,
+        "today": today.isoformat(),
+        "due": [
+            {"concept": r["concept"], "name": r["name"], "next_review": r["next_review"], "step": r["step"]}
+            for r in rows
+        ],
+    }
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
@@ -763,6 +856,9 @@ def build_parser() -> ArgumentParser:
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--misconception")
     group.add_argument("--explanation")
+
+    student_command("status", "show progress and queues", cmd_status)
+    student_command("due", "list concepts due for review", cmd_due)
 
     return parser
 
