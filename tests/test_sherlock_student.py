@@ -64,7 +64,7 @@ class RoundTests(PackageTestCase):
         self.assertEqual(5, out["unseen_remaining"])
         self.assertEqual(3, out["target_difficulty"])
         for question in out["questions"]:
-            self.assertEqual({"id", "question", "options", "hint"}, set(question))
+            self.assertEqual({"id", "type", "question", "options", "hint"}, set(question))
 
     def test_record_grades_and_refuses_bad_input(self):
         self.add_ready_quiz()

@@ -36,6 +36,7 @@ MAX_REQUESTS_PER_CONCEPT_PER_DAY = 3
 MAX_TEACH_ROUNDS_PER_DAY = 3
 MAX_MISCONCEPTION_CHARS = 120
 MODES = ("diagnose", "teach", "review")
+AUTO_MARKED_TYPES = ("multiple_choice", "multiple_select", "fill_in_the_blank")
 TARGET_DIFFICULTY = {"untested": 3, "weak": 2, "partial": 3, "mastered": 4}
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
@@ -317,62 +318,105 @@ def question_id(text: str) -> str:
 
 
 
+def normalize_answer_text(text: str) -> str:
+    """Comparable form of a short answer: drop LaTeX commands, case, and non-alphanumerics."""
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"\\[a-zA-Z]+", "", text).lower())
+
+
+def _clean(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def normalize_question(item: object, number: int) -> dict:
+    """Normalize one question; raise SherlockError if it cannot be used."""
+    if not isinstance(item, dict):
+        raise SherlockError(f"question {number} is not an object")
+    text = _clean(item.get("question"))
+    if text is None:
+        raise SherlockError(f"question {number} has no text")
+    kind = item.get("type") or "multiple_choice"
+    if item.get("imageUrls"):
+        raise SherlockError(f"question {number} needs an image the student cannot see")
+    question = {
+        "id": question_id(text),
+        "type": kind,
+        "question": text,
+        "options": [],
+        "answer_index": None,
+        "answer_indexes": [],
+        "answers": [],
+        "model_answer": None,
+        "rationale": _clean(item.get("rationale")),
+        "hint": _clean(item.get("hint")),
+    }
+    if kind in ("multiple_choice", "multiple_select"):
+        options = item.get("answerOptions")
+        if not isinstance(options, list) or len(options) < 2:
+            raise SherlockError(f"question {number} needs at least two answer options")
+        correct = []
+        for index, option in enumerate(options):
+            option_text = _clean(option.get("text")) if isinstance(option, dict) else None
+            if option_text is None:
+                raise SherlockError(f"question {number} option {index + 1} has no text")
+            question["options"].append(option_text)
+            if option.get("isCorrect") is True:
+                correct.append(index)
+        if kind == "multiple_choice" and len(correct) != 1:
+            raise SherlockError(
+                f"question {number} must have exactly one correct option, found {len(correct)}"
+            )
+        if kind == "multiple_select" and not correct:
+            raise SherlockError(f"question {number} has no correct option")
+        question["answer_indexes"] = correct
+        if kind == "multiple_choice":
+            question["answer_index"] = correct[0]
+            question["rationale"] = _clean(options[correct[0]].get("rationale"))
+    elif kind == "fill_in_the_blank":
+        best = _clean(item.get("bestAnswer"))
+        if best is None:
+            raise SherlockError(f"question {number} has no best answer")
+        extras = item.get("acceptableAnswers") or []
+        question["answers"] = [best] + [a for a in (_clean(x) for x in extras) if a]
+    elif kind == "short_answer":
+        grading = item.get("grading") if isinstance(item.get("grading"), dict) else {}
+        question["model_answer"] = _clean(grading.get("modelAnswer"))
+        if question["model_answer"] is None:
+            raise SherlockError(f"question {number} has no model answer")
+    else:
+        raise SherlockError(f"question {number} has unsupported type {kind!r}")
+    return question
+
+
 def normalize_quiz(raw: object, slot: str, artifact_id: str) -> dict:
     """Convert `nlm download quiz --format json` output into the bank's format.
 
-    Raises SherlockError describing the first problem found.
+    Unusable questions are skipped with a reason. Raises SherlockError when the
+    quiz has no question the script can mark automatically.
     """
     if not isinstance(raw, dict) or not isinstance(raw.get("questions"), list):
         raise SherlockError("quiz JSON must be an object with a 'questions' list")
     questions = []
+    skipped = []
     seen_ids = set()
     for number, item in enumerate(raw["questions"], start=1):
-        if not isinstance(item, dict):
-            raise SherlockError(f"question {number} is not an object")
-        text = item.get("question")
-        if not isinstance(text, str) or not text.strip():
-            raise SherlockError(f"question {number} has no text")
-        options = item.get("answerOptions")
-        if not isinstance(options, list) or len(options) < 2:
-            raise SherlockError(f"question {number} needs at least two answer options")
-        option_texts = []
-        correct = []
-        for index, option in enumerate(options):
-            option_text = option.get("text") if isinstance(option, dict) else None
-            if not isinstance(option_text, str) or not option_text.strip():
-                raise SherlockError(f"question {number} option {index + 1} has no text")
-            option_texts.append(option_text.strip())
-            if option.get("isCorrect") is True:
-                correct.append(index)
-        if len(correct) != 1:
-            raise SherlockError(
-                f"question {number} must have exactly one correct option, found {len(correct)}"
-            )
-        qid = question_id(text)
-        if qid in seen_ids:
+        try:
+            question = normalize_question(item, number)
+        except SherlockError as exc:
+            skipped.append(str(exc))
             continue
-        seen_ids.add(qid)
-        rationale = options[correct[0]].get("rationale")
-        hint = item.get("hint")
-        questions.append(
-            {
-                "id": qid,
-                "question": text.strip(),
-                "options": option_texts,
-                "answer_index": correct[0],
-                "rationale": rationale.strip()
-                if isinstance(rationale, str) and rationale.strip()
-                else None,
-                "hint": hint.strip() if isinstance(hint, str) and hint.strip() else None,
-            }
-        )
-    if not questions:
-        raise SherlockError("quiz has no questions")
+        if question["id"] in seen_ids:
+            continue
+        seen_ids.add(question["id"])
+        questions.append(question)
+    if not any(q["type"] in AUTO_MARKED_TYPES for q in questions):
+        detail = f" (skipped: {'; '.join(skipped[:3])})" if skipped else ""
+        raise SherlockError(f"quiz has no questions that can be marked automatically{detail}")
     return {
         "schema_version": SCHEMA_VERSION,
         "slot": slot,
         "artifact_id": artifact_id,
         "questions": questions,
+        "skipped": skipped,
     }
 
 
@@ -381,8 +425,12 @@ def cmd_bank_import(args: argparse.Namespace) -> dict:
     pkg = package_dir(args)
     bank = load_json(bank_file(pkg))
     quiz = find_quiz(bank, args.quiz)
-    if quiz["status"] != "pending":
-        raise SherlockError(f"{args.quiz} is {quiz['status']}, expected pending")
+    retry = quiz["status"] == "failed" and quiz["artifact_id"] is not None
+    if quiz["status"] != "pending" and not retry:
+        raise SherlockError(
+            f"{args.quiz} is {quiz['status']}; only pending quizzes, or failed ones that were "
+            "submitted to NotebookLM, can be imported"
+        )
     source = Path(args.file)
     if not source.is_file():
         raise SherlockError(f"downloaded quiz file not found: {source}")
@@ -397,9 +445,22 @@ def cmd_bank_import(args: argparse.Namespace) -> dict:
         save_json(bank_file(pkg), bank)
         raise SherlockError(f"{args.quiz} failed validation: {exc}") from exc
     save_json(pkg / quiz["file"], normalized)
-    quiz.update(status="ready", question_count=len(normalized["questions"]))
+    gradable = sum(1 for q in normalized["questions"] if q["type"] in AUTO_MARKED_TYPES)
+    quiz.update(
+        status="ready",
+        question_count=len(normalized["questions"]),
+        gradable_count=gradable,
+        skipped=len(normalized["skipped"]),
+        reason=None,
+    )
     save_json(bank_file(pkg), bank)
-    return {"slot": args.quiz, "status": "ready", "question_count": quiz["question_count"]}
+    return {
+        "slot": args.quiz,
+        "status": "ready",
+        "question_count": quiz["question_count"],
+        "gradable_count": gradable,
+        "skipped": quiz["skipped"],
+    }
 
 
 # --- Rules -------------------------------------------------------------------
@@ -489,7 +550,8 @@ def ready_questions(pkg: Path, bank: dict, concept: str) -> list:
         if quiz["concept"] != concept or quiz["status"] != "ready":
             continue
         for question in load_json(pkg / quiz["file"])["questions"]:
-            found.setdefault(question["id"], (quiz["difficulty"], question))
+            if question.get("type", "multiple_choice") in AUTO_MARKED_TYPES:
+                found.setdefault(question["id"], (quiz["difficulty"], question))
     return list(found.values())
 
 
@@ -561,6 +623,7 @@ def cmd_next(args: argparse.Namespace) -> dict:
         "questions": [
             {
                 "id": q["id"],
+                "type": q.get("type", "multiple_choice"),
                 "question": q["question"],
                 "options": q["options"],
                 "hint": q["hint"],
@@ -588,9 +651,7 @@ def cmd_record(args: argparse.Namespace) -> dict:
             break
     if match is None:
         raise SherlockError(f"question {args.question} is not in a ready quiz for {args.concept}")
-    if not 0 <= args.choice < len(match["options"]):
-        raise SherlockError(f"--choice must be 0-{len(match['options']) - 1}")
-    correct = args.choice == match["answer_index"]
+    correct, given, feedback = grade_answer(match, args)
     times = record["seen"].get(args.question, {}).get("times", 0)
     record["seen"][args.question] = {
         "last_seen": today.isoformat(),
@@ -598,19 +659,50 @@ def cmd_record(args: argparse.Namespace) -> dict:
         "last_correct": correct,
     }
     record["open_answers"].append(
-        {"question": args.question, "mode": args.mode, "choice": args.choice, "correct": correct}
+        {"question": args.question, "mode": args.mode, "choice": given, "correct": correct}
     )
     save_json(student_file(pkg, args.student), student)
     return {
         "question": args.question,
+        "type": match.get("type", "multiple_choice"),
         "correct": correct,
-        "correct_index": match["answer_index"],
-        "correct_option": match["options"][match["answer_index"]],
+        **feedback,
         "rationale": match["rationale"],
         "answered_this_round": sum(
             1 for answer in record["open_answers"] if answer["mode"] == args.mode
         ),
     }
+
+
+def grade_answer(question: dict, args: argparse.Namespace) -> tuple:
+    """Return (correct, value_to_store, feedback_fields). Free text is never stored."""
+    kind = question.get("type", "multiple_choice")
+    options = question["options"]
+    if kind == "multiple_choice":
+        if args.choice is None:
+            raise SherlockError("this is a multiple_choice question; pass --choice <index>")
+        if not 0 <= args.choice < len(options):
+            raise SherlockError(f"--choice must be 0-{len(options) - 1}")
+        index = question["answer_index"]
+        return (args.choice == index, args.choice,
+                {"correct_index": index, "correct_option": options[index]})
+    if kind == "multiple_select":
+        if args.choices is None:
+            raise SherlockError("this is a multiple_select question; pass --choices <i,j,...>")
+        try:
+            picked = [int(part) for part in args.choices.split(",")]
+        except ValueError as exc:
+            raise SherlockError("--choices must be comma-separated option indexes") from exc
+        if len(set(picked)) != len(picked) or not all(0 <= i < len(options) for i in picked):
+            raise SherlockError(f"--choices must be distinct indexes from 0-{len(options) - 1}")
+        wanted = question["answer_indexes"]
+        return (sorted(picked) == sorted(wanted), sorted(picked),
+                {"correct_indexes": wanted, "correct_options": [options[i] for i in wanted]})
+    if args.text is None:
+        raise SherlockError("this is a fill_in_the_blank question; pass --text <answer>")
+    accepted = {normalize_answer_text(answer) for answer in question["answers"]}
+    return (normalize_answer_text(args.text) in accepted, None,
+            {"accepted_answers": question["answers"]})
 
 
 
@@ -845,7 +937,10 @@ def build_parser() -> ArgumentParser:
     p.add_argument("--concept", required=True)
     p.add_argument("--mode", choices=MODES, required=True)
     p.add_argument("--question", required=True)
-    p.add_argument("--choice", type=int, required=True, help="0-based option index")
+    answer = p.add_mutually_exclusive_group(required=True)
+    answer.add_argument("--choice", type=int, help="0-based option index (multiple_choice)")
+    answer.add_argument("--choices", help="comma-separated 0-based indexes (multiple_select)")
+    answer.add_argument("--text", help="the student's answer (fill_in_the_blank); never stored")
 
     p = student_command("close-round", "score the open round", cmd_close_round)
     p.add_argument("--concept", required=True)

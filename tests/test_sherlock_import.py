@@ -24,9 +24,13 @@ class NormalizeQuizTests(unittest.TestCase):
         self.assertEqual(
             {
                 "id": sherlock.question_id("What is the main source of energy for photosynthesis?"),
+                "type": "multiple_choice",
                 "question": "What is the main source of energy for photosynthesis?",
                 "options": ["Carbon dioxide", "Sunlight", "Water", "Soil nutrients"],
                 "answer_index": 1,
+                "answer_indexes": [1],
+                "answers": [],
+                "model_answer": None,
                 "rationale": "Chlorophyll captures light energy, which drives the reaction.",
                 "hint": "Think about what a plant needs to be placed near.",
             },
@@ -69,7 +73,8 @@ class ImportCommandTests(PackageTestCase):
         slot = self.pending_slot()
         out = self.ok("bank", "import", "--dir", self.pkg, "--quiz", slot,
                       "--file", FIXTURES / "quiz-sample.json")
-        self.assertEqual({"slot": slot, "status": "ready", "question_count": 8}, out)
+        self.assertEqual({"slot": slot, "status": "ready", "question_count": 8,
+                          "gradable_count": 8, "skipped": 0}, out)
         stored = json.loads((self.pkg / "quiz-bank" / f"{slot}.json").read_text())
         self.assertEqual("artifact-test-1", stored["artifact_id"])
         self.assertEqual("ready", self.bank_quiz(slot)["status"])

@@ -36,11 +36,11 @@ Run as `python3 <skill-dir>/scripts/sherlock.py <command> --dir <pkg> [options]`
 | `bank request` | `--concept <slug>` `--difficulty <1-5>` `[--count 8]` | Reserves a quiz slot, counts it against today's cap, and prints the exact `nlm quiz create` command to run (`command` as a list, `command_line` as a string). |
 | `bank submitted` | `--quiz <slot>` `--artifact-id <id>` | Marks a reserved slot `pending`. |
 | `bank pending` | | Lists pending slots with `artifact_id` and `minutes_pending`. |
-| `bank import` | `--quiz <slot>` `--file <downloaded.json>` | Validates and normalizes a downloaded quiz; marks it `ready`, or `failed` if invalid. A missing file changes nothing. |
+| `bank import` | `--quiz <slot>` `--file <downloaded.json>` | Validates and normalizes a downloaded quiz; marks it `ready` (reporting `gradable_count` and `skipped`), or `failed` if no question can be marked automatically. A missing file changes nothing. A failed slot that has an artifact ID can be imported again. |
 | `bank fail` | `--quiz <slot>` `--reason <text>` | Marks a reserved or pending slot `failed`. |
 | `student new` | `[--nickname <nickname>]` | Creates a student file. Without a nickname, the ID is `s-` plus six hex characters. |
 | `next` | `--student <id>` `--concept <slug>` `--count <n>` `--mode <mode>` | Selects questions. Output has `questions` (`id`, `question`, `options`, `hint` — never the answer), `shortfall`, `unseen_remaining`, `target_difficulty`. |
-| `record` | `--student <id>` `--concept <slug>` `--mode <mode>` `--question <id>` `--choice <0-based index>` | Grades one answer. Output has `correct`, `correct_index`, `correct_option`, `rationale`, `answered_this_round`. |
+| `record` | `--student <id>` `--concept <slug>` `--mode <mode>` `--question <id>` and one of `--choice <index>` (multiple_choice), `--choices <i,j,...>` (multiple_select), `--text <answer>` (fill_in_the_blank) | Grades one answer. Output has `type`, `correct`, `rationale`, `answered_this_round`, plus `correct_index`/`correct_option`, `correct_indexes`/`correct_options`, or `accepted_answers` by type. Typed text is never stored. |
 | `close-round` | `--student <id>` `--concept <slug>` `--mode <mode>` | Scores the answers recorded since the last round and applies the rules below. |
 | `note` | `--student <id>` `--concept <slug>` and one of `--misconception <text>` / `--explanation <tag>` | Records a one-line misconception (max 120 characters) or an explanation-strategy tag. |
 | `status` | `--student <id>` | Per-concept rows (`status`, `score`, `step`, `next_review`, `unseen_questions`, `teach_rounds_today`, `quizzes_pending`, `misconceptions`), plus `teach_queue`, `due`, and `quota`. |
@@ -124,17 +124,24 @@ A failed review sends the concept back to the teach queue. When it is mastered a
   "questions": [
     {
       "id": "3f9c2a1b7d4e",
+      "type": "multiple_choice",
       "question": "What is the main source of energy for photosynthesis?",
       "options": ["Carbon dioxide", "Sunlight", "Water", "Soil nutrients"],
       "answer_index": 1,
+      "answer_indexes": [1],
+      "answers": [],
+      "model_answer": null,
       "rationale": null,
       "hint": "Think about what a plant needs to be placed near."
     }
-  ]
+  ],
+  "skipped": ["question 5 needs an image the student cannot see"]
 }
 ```
 
-`bank import` reads the `nlm download quiz --format json` shape (`questions[].question`, `questions[].answerOptions[].text` / `.isCorrect`, optional `hint`; see `references/nlm-cli-quirks.md`). It rejects a quiz with no questions, or any question without at least two options and exactly one correct option.
+Every question has the same keys. `multiple_choice` uses `answer_index`; `multiple_select` uses `answer_indexes`; `fill_in_the_blank` uses `answers` (best answer first) and has no `options`; `short_answer` keeps `model_answer` for a future judge and is never served by `next`. Fill-in answers match after lowercasing and removing LaTeX commands and non-alphanumerics, so `O2` matches `$O_2$`.
+
+`bank import` reads the `nlm download quiz --format json` shape described in `references/nlm-cli-quirks.md`. It skips, with a reason, any question that is malformed, has an unsupported type, needs an image, or (for `multiple_choice`) lacks exactly one correct option. It fails only when no question can be marked automatically.
 
 ### Student file (`students/<student-id>.json`)
 

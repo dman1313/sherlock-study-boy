@@ -9,7 +9,9 @@ All notable changes to this project are documented here.
 - `scripts/sherlock.py`, a standard-library script that owns the shared quiz bank, student
   progress, grading, mastery thresholds, the review schedule (1, 2, 4, 8, 16, 30, 60 days),
   question selection, and a daily quiz-generation cap.
-- NotebookLM native quizzes as the question source, one focused quiz per concept.
+- NotebookLM native quizzes as the question source, one focused quiz per concept. Multiple-choice,
+  multiple-select, and fill-in-the-blank questions are marked automatically; short-answer questions
+  are stored for a future judge; questions that need a diagram are skipped.
 - `references/adaptive-learning.md` with the data files, rules, and command reference.
 - Offline tests for the script and a check that the docs only name real commands.
 

@@ -215,7 +215,7 @@ Below, `sherlock` means `python3 <skill-dir>/scripts/sherlock.py` (the script ne
 - Start every session with `nlm login --check` and `sherlock status --dir <pkg> --student <id>`. If login fails, tell the student to ask whoever set Sherlock up to run `nlm login`, and stop.
 - Only quiz answers change mastery. Record each answer with `sherlock record` and end each round with `sherlock close-round`.
 - `sherlock next` never includes correct answers. Do not reveal an answer before the student chooses; `sherlock record` returns the correct option afterwards for feedback.
-- Pass `--choice` as the 0-based index of the option the student picked.
+- Answer by question `type`: `--choice <index>` for `multiple_choice`, `--choices <i,j,...>` for `multiple_select` (every correct option, nothing else), and `--text "<answer>"` for `fill_in_the_blank`. Indexes are 0-based. Typed answers are marked but never stored.
 - If a `sherlock` command exits non-zero, read its one-line error, explain it plainly, and do not work around it by editing files.
 
 ### Diagnose mode
@@ -246,7 +246,7 @@ Use for a student's first session on a notebook.
    ```
 
    Start quizzing as soon as the first concept is ready, and check the others between concepts.
-5. For each ready concept: `sherlock next --dir <pkg> --student <id> --concept <slug> --count 3 --mode diagnose`. Ask each question with its options, run `sherlock record --dir <pkg> --student <id> --concept <slug> --mode diagnose --question <question-id> --choice <index>`, give brief feedback, then `sherlock close-round --dir <pkg> --student <id> --concept <slug> --mode diagnose`.
+5. For each ready concept: `sherlock next --dir <pkg> --student <id> --concept <slug> --count 3 --mode diagnose`. Ask each question with its options, run `sherlock record --dir <pkg> --student <id> --concept <slug> --mode diagnose --question <question-id>` plus `--choice`, `--choices`, or `--text` for that question's type, give brief feedback, then `sherlock close-round --dir <pkg> --student <id> --concept <slug> --mode diagnose`.
 6. Finish with `sherlock status`: show each concept as mastered (green), partial (yellow), or weak (red).
 
 ### Teach mode
@@ -278,7 +278,7 @@ Use for a student's first session on a notebook.
 | Studio status `unknown` | Keep polling until `minutes_pending` reaches 10; never submit a duplicate while one is pending. Then `sherlock bank fail`. |
 | Studio status `failed` | `sherlock bank fail`, then request once more. After a second failure, skip the concept for today. |
 | Rate limited (`code 8`) | `sherlock bank fail`, wait 5 minutes, then request again. The script allows 3 requests per concept per day. |
-| `bank import` fails validation | The quiz is marked failed and its questions are never shown. Request another if needed. |
+| `bank import` fails validation | The quiz is marked failed and its questions are never shown. If the download was incomplete, download again and re-run `bank import`; no new generation is needed. Otherwise request another. |
 | `bank request` reports the daily cap | Continue with questions already in the bank and tell the student. |
 
 ## Output Structure
