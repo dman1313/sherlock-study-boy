@@ -79,3 +79,51 @@ class PackageTestCase(unittest.TestCase):
         for slug, focus, rank in concepts or (("photosynthesis", "Photosynthesis", 1),):
             self.ok("bank", "add-concept", "--dir", self.pkg, "--slug", slug,
                     "--name", focus, "--focus", focus, "--rank", rank)
+
+    def add_ready_quiz(self, concept="photosynthesis", difficulty=3, quiz=None, today=None):
+        """Request, submit, and import one quiz. quiz: nlm-format dict; default is the sample fixture."""
+        slot = self.ok("bank", "request", "--dir", self.pkg, "--concept", concept,
+                       "--difficulty", difficulty, "--today", today or self.TODAY)["slot"]
+        self.ok("bank", "submitted", "--dir", self.pkg, "--quiz", slot,
+                "--artifact-id", f"artifact-{slot}")
+        source = FIXTURES / "quiz-sample.json"
+        if quiz is not None:
+            source = self.pkg / f"download-{slot}.json"
+            source.write_text(json.dumps(quiz), encoding="utf-8")
+        self.ok("bank", "import", "--dir", self.pkg, "--quiz", slot, "--file", source)
+        return slot
+
+    def new_student(self, nickname="test-kid"):
+        return self.ok("student", "new", "--dir", self.pkg, "--nickname", nickname,
+                       "--today", self.TODAY)["student_id"]
+
+    def answer_key(self):
+        """question id -> answer_index, read from every imported quiz file."""
+        key = {}
+        for path in (self.pkg / "quiz-bank").glob("*.json"):
+            if path.name != "bank.json":
+                for question in json.loads(path.read_text())["questions"]:
+                    key[question["id"]] = question["answer_index"]
+        return key
+
+    def play_round(self, student, concept, mode, count, n_correct, today=None):
+        """Ask `count` questions, answer the first `n_correct` correctly, close the round."""
+        today = today or self.TODAY
+        picked = self.ok("next", "--dir", self.pkg, "--student", student, "--concept", concept,
+                         "--count", count, "--mode", mode, "--today", today)
+        self.assertEqual(count, len(picked["questions"]), picked)
+        key = self.answer_key()
+        for index, question in enumerate(picked["questions"]):
+            right = key[question["id"]]
+            choice = right if index < n_correct else (right + 1) % len(question["options"])
+            self.ok("record", "--dir", self.pkg, "--student", student, "--concept", concept,
+                    "--mode", mode, "--question", question["id"], "--choice", choice,
+                    "--today", today)
+        return self.ok("close-round", "--dir", self.pkg, "--student", student,
+                       "--concept", concept, "--mode", mode, "--today", today)
+
+    def student_data(self, student):
+        return json.loads((self.pkg / "students" / f"{student}.json").read_text())
+
+    def write_student_data(self, student, data):
+        (self.pkg / "students" / f"{student}.json").write_text(json.dumps(data))

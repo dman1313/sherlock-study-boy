@@ -479,6 +479,197 @@ def new_concept_record() -> dict:
     }
 
 
+# --- Students and rounds -----------------------------------------------------
+
+
+def ready_questions(pkg: Path, bank: dict, concept: str) -> list:
+    """(difficulty, question) for every question in the concept's ready quizzes, deduplicated by ID."""
+    found = {}
+    for quiz in bank["quizzes"]:
+        if quiz["concept"] != concept or quiz["status"] != "ready":
+            continue
+        for question in load_json(pkg / quiz["file"])["questions"]:
+            found.setdefault(question["id"], (quiz["difficulty"], question))
+    return list(found.values())
+
+
+
+def load_student(pkg: Path, student_id: str) -> dict:
+    if not NICKNAME_RE.match(student_id):
+        raise SherlockError(f"invalid student id: {student_id!r}")
+    return load_json(student_file(pkg, student_id))
+
+
+
+def concept_record(student: dict, bank: dict, concept: str) -> dict:
+    require_concept(bank, concept)
+    return student["concepts"].setdefault(concept, new_concept_record())
+
+
+
+def cmd_student_new(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    today = today_from(args)
+    bank = load_json(bank_file(pkg))
+    if args.nickname is not None:
+        if not NICKNAME_RE.match(args.nickname):
+            raise SherlockError(
+                "nickname must be 3-32 lowercase letters, digits, or dashes, starting with a letter or digit"
+            )
+        student_id = args.nickname
+        if student_file(pkg, student_id).exists():
+            raise SherlockError(f"student already exists: {student_id}")
+    else:
+        for _ in range(10):
+            student_id = "s-" + secrets.token_hex(3)
+            if not student_file(pkg, student_id).exists():
+                break
+        else:
+            raise SherlockError("could not generate an unused student id")
+    student = {
+        "schema_version": SCHEMA_VERSION,
+        "student_id": student_id,
+        "notebook_id": bank["notebook_id"],
+        "created": today.isoformat(),
+        "concepts": {slug: new_concept_record() for slug in bank["concepts"]},
+    }
+    save_json(student_file(pkg, student_id), student)
+    return {"student_id": student_id, "concepts": sorted(student["concepts"])}
+
+
+
+def cmd_next(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    bank = load_json(bank_file(pkg))
+    student = load_student(pkg, args.student)
+    record = concept_record(student, bank, args.concept)
+    if args.count < 1:
+        raise SherlockError("--count must be at least 1")
+    target = TARGET_DIFFICULTY[record["status"]]
+    in_round = {answer["question"] for answer in record["open_answers"]}
+    candidates = [
+        c for c in ready_questions(pkg, bank, args.concept) if c[1]["id"] not in in_round
+    ]
+    selected, unseen_remaining = select_questions(
+        candidates, record["seen"], target, args.count, allow_seen=args.mode == "review"
+    )
+    return {
+        "student": args.student,
+        "concept": args.concept,
+        "mode": args.mode,
+        "target_difficulty": target,
+        "questions": [
+            {
+                "id": q["id"],
+                "question": q["question"],
+                "options": q["options"],
+                "hint": q["hint"],
+            }
+            for q in selected
+        ],
+        "shortfall": args.count - len(selected),
+        "unseen_remaining": unseen_remaining,
+    }
+
+
+
+def cmd_record(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    today = today_from(args)
+    bank = load_json(bank_file(pkg))
+    student = load_student(pkg, args.student)
+    record = concept_record(student, bank, args.concept)
+    if any(answer["question"] == args.question for answer in record["open_answers"]):
+        raise SherlockError(f"question {args.question} is already answered in this round")
+    match = None
+    for _, question in ready_questions(pkg, bank, args.concept):
+        if question["id"] == args.question:
+            match = question
+            break
+    if match is None:
+        raise SherlockError(f"question {args.question} is not in a ready quiz for {args.concept}")
+    if not 0 <= args.choice < len(match["options"]):
+        raise SherlockError(f"--choice must be 0-{len(match['options']) - 1}")
+    correct = args.choice == match["answer_index"]
+    times = record["seen"].get(args.question, {}).get("times", 0)
+    record["seen"][args.question] = {
+        "last_seen": today.isoformat(),
+        "times": times + 1,
+        "last_correct": correct,
+    }
+    record["open_answers"].append(
+        {"question": args.question, "mode": args.mode, "choice": args.choice, "correct": correct}
+    )
+    save_json(student_file(pkg, args.student), student)
+    return {
+        "question": args.question,
+        "correct": correct,
+        "correct_index": match["answer_index"],
+        "correct_option": match["options"][match["answer_index"]],
+        "rationale": match["rationale"],
+        "answered_this_round": sum(
+            1 for answer in record["open_answers"] if answer["mode"] == args.mode
+        ),
+    }
+
+
+
+def cmd_close_round(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    today = today_from(args)
+    bank = load_json(bank_file(pkg))
+    student = load_student(pkg, args.student)
+    record = concept_record(student, bank, args.concept)
+    answers = [answer for answer in record["open_answers"] if answer["mode"] == args.mode]
+    if not answers:
+        raise SherlockError(f"no recorded {args.mode} answers for {args.concept} to close")
+    correct = sum(1 for answer in answers if answer["correct"])
+    apply_round(record, args.mode, correct, len(answers), today)
+    record["open_answers"] = [
+        answer for answer in record["open_answers"] if answer["mode"] != args.mode
+    ]
+    save_json(student_file(pkg, args.student), student)
+    return {
+        "concept": args.concept,
+        "mode": args.mode,
+        "correct": correct,
+        "asked": len(answers),
+        "score": record["score"],
+        "status": record["status"],
+        "step": record["step"],
+        "next_review": record["next_review"],
+    }
+
+
+
+def cmd_note(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    bank = load_json(bank_file(pkg))
+    student = load_student(pkg, args.student)
+    record = concept_record(student, bank, args.concept)
+    if args.misconception is not None:
+        text = " ".join(args.misconception.split())
+        if not text or len(text) > MAX_MISCONCEPTION_CHARS:
+            raise SherlockError(
+                f"--misconception must be 1-{MAX_MISCONCEPTION_CHARS} characters on one line"
+            )
+        if text not in record["misconceptions"]:
+            record["misconceptions"].append(text)
+    else:
+        if not TAG_RE.match(args.explanation):
+            raise SherlockError(
+                "--explanation must be a tag of 1-40 lowercase letters, digits, or dashes"
+            )
+        if args.explanation not in record["explanations_tried"]:
+            record["explanations_tried"].append(args.explanation)
+    save_json(student_file(pkg, args.student), student)
+    return {
+        "concept": args.concept,
+        "misconceptions": record["misconceptions"],
+        "explanations_tried": record["explanations_tried"],
+    }
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
@@ -539,6 +730,39 @@ def build_parser() -> ArgumentParser:
     p.add_argument("--quiz", required=True)
     p.add_argument("--file", required=True)
     p.set_defaults(handler=cmd_bank_import)
+
+    student = commands.add_parser("student", help="manage students")
+    student_actions = student.add_subparsers(dest="action", required=True)
+    p = student_actions.add_parser("new", parents=[common], help="create a student file")
+    p.add_argument("--nickname")
+    p.set_defaults(handler=cmd_student_new)
+
+    def student_command(name: str, help_text: str, handler) -> ArgumentParser:
+        sub = commands.add_parser(name, parents=[common], help=help_text)
+        sub.add_argument("--student", required=True)
+        sub.set_defaults(handler=handler)
+        return sub
+
+    p = student_command("next", "select questions for a round", cmd_next)
+    p.add_argument("--concept", required=True)
+    p.add_argument("--count", type=int, required=True)
+    p.add_argument("--mode", choices=MODES, required=True)
+
+    p = student_command("record", "grade and record one answer", cmd_record)
+    p.add_argument("--concept", required=True)
+    p.add_argument("--mode", choices=MODES, required=True)
+    p.add_argument("--question", required=True)
+    p.add_argument("--choice", type=int, required=True, help="0-based option index")
+
+    p = student_command("close-round", "score the open round", cmd_close_round)
+    p.add_argument("--concept", required=True)
+    p.add_argument("--mode", choices=MODES, required=True)
+
+    p = student_command("note", "record a misconception or explanation tag", cmd_note)
+    p.add_argument("--concept", required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--misconception")
+    group.add_argument("--explanation")
 
     return parser
 
