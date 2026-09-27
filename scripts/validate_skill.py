@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,6 +56,49 @@ def parse_frontmatter(text: str) -> dict[str, str]:
     return values
 
 
+SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", "node_modules"}
+
+
+def walk_files(root: Path) -> list[Path]:
+    """Every file under root, skipping VCS, cache, and environment directories."""
+    files = []
+    for path in sorted(root.rglob("*")):
+        rel_parts = path.relative_to(root).parts
+        if any(part in SKIP_DIRS for part in rel_parts):
+            continue
+        if path.is_file():
+            files.append(path)
+    return files
+
+
+def candidate_files(root: Path) -> list[Path]:
+    """Files git would commit: tracked plus untracked-but-not-ignored.
+
+    Falls back to walk_files() when root is not inside a git work tree
+    (for example, a copy installed without .git).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+             "--exclude-standard"],
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return walk_files(root)
+    names = [name for name in result.stdout.decode("utf-8").split("\0") if name]
+    files = [root / name for name in names if (root / name).is_file()]
+    return files or walk_files(root)
+
+
+def read_text_or_none(path: Path) -> str | None:
+    """Return the file's UTF-8 text, or None for binary/unreadable files."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def validate() -> list[str]:
     errors: list[str] = []
     for path in REQUIRED_FILES:
@@ -85,14 +129,15 @@ def validate() -> list[str]:
         if snippet not in text:
             errors.append(f"missing required instruction: {snippet}")
 
-    all_text = "\n".join(
-        path.read_text(encoding="utf-8", errors="replace")
-        for path in ROOT.rglob("*")
-        if path.is_file() and ".git" not in path.parts
-    )
-    for label, pattern in FORBIDDEN_PATTERNS.items():
-        if pattern.search(all_text):
-            errors.append(f"forbidden content found: {label}")
+    for path in candidate_files(ROOT):
+        file_text = read_text_or_none(path)
+        if file_text is None:
+            continue
+        for label, pattern in FORBIDDEN_PATTERNS.items():
+            if pattern.search(file_text):
+                errors.append(
+                    f"forbidden content found: {label} in {path.relative_to(ROOT)}"
+                )
 
     referenced = set(re.findall(r"references/[A-Za-z0-9._/-]+\.md", text))
     for rel in sorted(referenced):
