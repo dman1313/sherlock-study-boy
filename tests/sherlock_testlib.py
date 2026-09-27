@@ -32,6 +32,23 @@ def run(*argv):
     return code, (json.loads(text) if text else None), err.getvalue()
 
 
+def nlm_quiz(prefix, count, correct_index=1):
+    """Build a quiz in `nlm download quiz --format json` shape with distinct questions."""
+    return {
+        "title": f"{prefix} quiz",
+        "questions": [
+            {
+                "question": f"{prefix} question {n}?",
+                "answerOptions": [
+                    {"text": f"{prefix} {n} option {i}", "isCorrect": i == correct_index}
+                    for i in range(4)
+                ],
+            }
+            for n in range(1, count + 1)
+        ],
+    }
+
+
 class PackageTestCase(unittest.TestCase):
     """Each test gets an empty study package directory at self.pkg."""
 

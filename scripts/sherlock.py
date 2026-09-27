@@ -307,6 +307,101 @@ def cmd_bank_fail(args: argparse.Namespace) -> dict:
     return {"slot": args.quiz, "status": "failed", "reason": quiz["reason"]}
 
 
+# --- Quiz import -------------------------------------------------------------
+
+
+def question_id(text: str) -> str:
+    """Stable ID: first 12 hex chars of SHA-256 of the lowercased, whitespace-collapsed text."""
+    normalized = " ".join(text.lower().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+
+
+
+def normalize_quiz(raw: object, slot: str, artifact_id: str) -> dict:
+    """Convert `nlm download quiz --format json` output into the bank's format.
+
+    Raises SherlockError describing the first problem found.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("questions"), list):
+        raise SherlockError("quiz JSON must be an object with a 'questions' list")
+    questions = []
+    seen_ids = set()
+    for number, item in enumerate(raw["questions"], start=1):
+        if not isinstance(item, dict):
+            raise SherlockError(f"question {number} is not an object")
+        text = item.get("question")
+        if not isinstance(text, str) or not text.strip():
+            raise SherlockError(f"question {number} has no text")
+        options = item.get("answerOptions")
+        if not isinstance(options, list) or len(options) < 2:
+            raise SherlockError(f"question {number} needs at least two answer options")
+        option_texts = []
+        correct = []
+        for index, option in enumerate(options):
+            option_text = option.get("text") if isinstance(option, dict) else None
+            if not isinstance(option_text, str) or not option_text.strip():
+                raise SherlockError(f"question {number} option {index + 1} has no text")
+            option_texts.append(option_text.strip())
+            if option.get("isCorrect") is True:
+                correct.append(index)
+        if len(correct) != 1:
+            raise SherlockError(
+                f"question {number} must have exactly one correct option, found {len(correct)}"
+            )
+        qid = question_id(text)
+        if qid in seen_ids:
+            continue
+        seen_ids.add(qid)
+        rationale = options[correct[0]].get("rationale")
+        hint = item.get("hint")
+        questions.append(
+            {
+                "id": qid,
+                "question": text.strip(),
+                "options": option_texts,
+                "answer_index": correct[0],
+                "rationale": rationale.strip()
+                if isinstance(rationale, str) and rationale.strip()
+                else None,
+                "hint": hint.strip() if isinstance(hint, str) and hint.strip() else None,
+            }
+        )
+    if not questions:
+        raise SherlockError("quiz has no questions")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "slot": slot,
+        "artifact_id": artifact_id,
+        "questions": questions,
+    }
+
+
+
+def cmd_bank_import(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    bank = load_json(bank_file(pkg))
+    quiz = find_quiz(bank, args.quiz)
+    if quiz["status"] != "pending":
+        raise SherlockError(f"{args.quiz} is {quiz['status']}, expected pending")
+    source = Path(args.file)
+    if not source.is_file():
+        raise SherlockError(f"downloaded quiz file not found: {source}")
+    try:
+        try:
+            raw = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SherlockError(f"cannot parse {source}: {exc}") from exc
+        normalized = normalize_quiz(raw, quiz["slot"], quiz["artifact_id"])
+    except SherlockError as exc:
+        quiz.update(status="failed", reason=str(exc)[:200])
+        save_json(bank_file(pkg), bank)
+        raise SherlockError(f"{args.quiz} failed validation: {exc}") from exc
+    save_json(pkg / quiz["file"], normalized)
+    quiz.update(status="ready", question_count=len(normalized["questions"]))
+    save_json(bank_file(pkg), bank)
+    return {"slot": args.quiz, "status": "ready", "question_count": quiz["question_count"]}
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
@@ -362,6 +457,11 @@ def build_parser() -> ArgumentParser:
     p.add_argument("--quiz", required=True)
     p.add_argument("--reason", required=True)
     p.set_defaults(handler=cmd_bank_fail)
+
+    p = actions.add_parser("import", parents=[common], help="import a downloaded quiz")
+    p.add_argument("--quiz", required=True)
+    p.add_argument("--file", required=True)
+    p.set_defaults(handler=cmd_bank_import)
 
     return parser
 

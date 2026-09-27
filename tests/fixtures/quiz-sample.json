@@ -1,0 +1,80 @@
+{
+  "title": "Photosynthesis Quiz",
+  "questions": [
+    {
+      "question": "What is the main source of energy for photosynthesis?",
+      "answerOptions": [
+        { "text": "Carbon dioxide", "isCorrect": false },
+        { "text": "Sunlight", "isCorrect": true, "rationale": "Chlorophyll captures light energy, which drives the reaction." },
+        { "text": "Water", "isCorrect": false },
+        { "text": "Soil nutrients", "isCorrect": false }
+      ],
+      "hint": "Think about what a plant needs to be placed near."
+    },
+    {
+      "question": "Which pigment absorbs light in plant cells?",
+      "answerOptions": [
+        { "text": "Chlorophyll", "isCorrect": true },
+        { "text": "Haemoglobin", "isCorrect": false },
+        { "text": "Melanin", "isCorrect": false },
+        { "text": "Keratin", "isCorrect": false }
+      ],
+      "hint": "It gives leaves their green colour."
+    },
+    {
+      "question": "Where in the cell does photosynthesis take place?",
+      "answerOptions": [
+        { "text": "Mitochondria", "isCorrect": false },
+        { "text": "Nucleus", "isCorrect": false },
+        { "text": "Chloroplasts", "isCorrect": true },
+        { "text": "Cell membrane", "isCorrect": false }
+      ]
+    },
+    {
+      "question": "Which gas is released as a by-product of photosynthesis?",
+      "answerOptions": [
+        { "text": "Oxygen", "isCorrect": true },
+        { "text": "Carbon dioxide", "isCorrect": false },
+        { "text": "Nitrogen", "isCorrect": false },
+        { "text": "Hydrogen", "isCorrect": false }
+      ]
+    },
+    {
+      "question": "Which gas do plants take in for photosynthesis?",
+      "answerOptions": [
+        { "text": "Oxygen", "isCorrect": false },
+        { "text": "Carbon dioxide", "isCorrect": true },
+        { "text": "Nitrogen", "isCorrect": false },
+        { "text": "Methane", "isCorrect": false }
+      ]
+    },
+    {
+      "question": "What sugar is produced by photosynthesis?",
+      "answerOptions": [
+        { "text": "Glucose", "isCorrect": true },
+        { "text": "Sucrose", "isCorrect": false },
+        { "text": "Lactose", "isCorrect": false },
+        { "text": "Fructose", "isCorrect": false }
+      ]
+    },
+    {
+      "question": "Which factor would most likely increase the rate of photosynthesis?",
+      "answerOptions": [
+        { "text": "Lower light intensity", "isCorrect": false },
+        { "text": "Higher light intensity", "isCorrect": true },
+        { "text": "Removing water", "isCorrect": false },
+        { "text": "Covering the leaves", "isCorrect": false }
+      ]
+    },
+    {
+      "question": "Through which structures does carbon dioxide enter a leaf?",
+      "answerOptions": [
+        { "text": "Roots", "isCorrect": false },
+        { "text": "Stomata", "isCorrect": true },
+        { "text": "Xylem", "isCorrect": false },
+        { "text": "Petals", "isCorrect": false }
+      ],
+      "hint": "Tiny pores, mostly on the underside of the leaf."
+    }
+  ]
+}

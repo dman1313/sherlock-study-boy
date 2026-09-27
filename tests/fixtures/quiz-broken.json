@@ -1,0 +1,13 @@
+{
+  "title": "Broken Quiz",
+  "questions": [
+    {
+      "question": "Which of these is a primary colour of light?",
+      "answerOptions": [
+        { "text": "Red", "isCorrect": true },
+        { "text": "Green", "isCorrect": true },
+        { "text": "Brown", "isCorrect": false }
+      ]
+    }
+  ]
+}
