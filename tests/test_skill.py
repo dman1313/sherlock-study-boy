@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -19,8 +20,15 @@ class SkillRepositoryTests(unittest.TestCase):
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         frontmatter = validator.parse_frontmatter(text)
         self.assertEqual("sherlock-study-boy", frontmatter["name"])
-        self.assertEqual("1.0.0", frontmatter["version"])
         self.assertEqual("MIT", frontmatter["license"])
+
+    def test_version_matches_newest_changelog_entry(self):
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        version = validator.parse_frontmatter(text)["version"]
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        newest = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+        self.assertIsNotNone(newest, "CHANGELOG.md has no '## [x.y.z]' heading")
+        self.assertEqual(newest.group(1), version)
 
     def test_workflow_steps_are_contiguous(self):
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
