@@ -402,6 +402,83 @@ def cmd_bank_import(args: argparse.Namespace) -> dict:
     return {"slot": args.quiz, "status": "ready", "question_count": quiz["question_count"]}
 
 
+# --- Rules -------------------------------------------------------------------
+
+
+def classify(score: float) -> str:
+    if score >= MASTERED_AT:
+        return "mastered"
+    if score >= PARTIAL_AT:
+        return "partial"
+    return "weak"
+
+
+
+def apply_round(
+    record: dict, mode: str, correct: int, asked: int, today: dt.date
+) -> dict:
+    """Apply one closed round to a student's concept record. Mutates and returns it."""
+    if asked <= 0:
+        raise SherlockError("a round needs at least one answer")
+    score = correct / asked
+    status = classify(score)
+    if status == "mastered":
+        if mode == "diagnose":
+            step = DIAGNOSE_MASTERED_STEP
+        elif mode == "teach":
+            step = 0
+        else:
+            step = min(record["step"] + 1, len(LADDER_DAYS) - 1)
+        next_review = (today + dt.timedelta(days=LADDER_DAYS[step])).isoformat()
+    else:
+        step = 0
+        next_review = None
+    record.update(
+        status=status, score=round(score, 4), step=step, next_review=next_review
+    )
+    record["rounds"].append(
+        {"date": today.isoformat(), "mode": mode, "correct": correct, "asked": asked}
+    )
+    return record
+
+
+
+def select_questions(
+    candidates: list, seen: dict, target: int, count: int, allow_seen: bool
+) -> tuple:
+    """Pick questions for a round.
+
+    candidates: list of (difficulty, question) pairs in bank order.
+    Returns (selected_questions, unseen_remaining).
+    Unseen questions come first, closest difficulty to target first (ties keep
+    bank order). If allow_seen, top up with seen questions, oldest last_seen first.
+    """
+    unseen = [c for c in candidates if c[1]["id"] not in seen]
+    unseen.sort(key=lambda c: abs(c[0] - target))
+    selected = unseen[:count]
+    if allow_seen and len(selected) < count:
+        already = [c for c in candidates if c[1]["id"] in seen]
+        already.sort(key=lambda c: (seen[c[1]["id"]]["last_seen"], abs(c[0] - target)))
+        selected = selected + already[: count - len(selected)]
+    unseen_remaining = max(len(unseen) - count, 0)
+    return [question for _, question in selected], unseen_remaining
+
+
+
+def new_concept_record() -> dict:
+    return {
+        "status": "untested",
+        "score": None,
+        "step": 0,
+        "next_review": None,
+        "misconceptions": [],
+        "explanations_tried": [],
+        "rounds": [],
+        "open_answers": [],
+        "seen": {},
+    }
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
