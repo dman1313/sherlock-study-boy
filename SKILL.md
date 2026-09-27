@@ -1,25 +1,26 @@
 ---
 name: sherlock-study-boy
-description: Turn curriculum files into NotebookLM study media.
-version: 2.0.1
+description: Turn curriculum into NotebookLM study media and tutoring.
+version: 2.1.0
 author: Dwayne Primeau, Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [notebooklm, curriculum, video, study-materials]
+    tags: [notebooklm, curriculum, video, study-materials, tutoring]
     related_skills: []
 ---
 
 # Sherlock Study Boy
 
-Turn authorized curriculum documents into native NotebookLM videos or complete study packages. This skill orchestrates the `nlm` CLI; it does not replace NotebookLM with locally invented artifacts.
+Turn authorized curriculum documents into native NotebookLM videos or complete study packages, then tutor a student through them. This skill orchestrates the `nlm` CLI; it does not replace NotebookLM with locally invented artifacts.
 
 ## When to Use
 
 - Create a NotebookLM video from curriculum, syllabus, assessment, or lesson files.
 - Build a complete study package from an existing NotebookLM notebook.
 - Identify frequently assessed concepts, then generate focused learning media.
+- Tutor a student: diagnose knowledge gaps, teach weak concepts, answer questions, and schedule reviews ("tutor me", "diagnose my knowledge", "adaptive study").
 
 **Do not use for:** student records, safeguarding material, confidential accommodations, grading data, or content the user is not authorized to upload.
 
@@ -39,6 +40,7 @@ Read `references/privacy-and-safety.md` before uploading curriculum files. Read 
 1. **Video-only:** ingest sources if needed, analyze the audience and concepts, generate one native video, download it, and verify the MP4.
 2. **Full package:** generate the video plus report, slides, flashcards, quiz, audio, mind map, infographic, answer keys, and package index.
 3. **Focused deep dive:** after the notebook-level package, generate explicitly requested concept-specific media using a two-to-five-word focus phrase.
+4. **Adaptive tutoring:** diagnose, teach, tutor, and review one student at a time using NotebookLM quizzes. See Adaptive Modes.
 
 Default to **video-only** when the user asks only for a video. Do not expand to the full package without approval.
 
@@ -201,6 +203,84 @@ Report:
 
 Never include authentication cookies or session state in the report.
 
+## Adaptive Modes
+
+After a notebook has a curriculum analysis (Step 3), Sherlock can tutor one student at a time in four modes: diagnose, teach, tutor, and review. NotebookLM generates the quiz questions (one focused quiz per concept). The bundled script `scripts/sherlock.py` does all grading and record keeping. Read `references/adaptive-learning.md` for the data files, rules, and full command reference.
+
+Below, `sherlock` means `python3 <skill-dir>/scripts/sherlock.py` (the script next to this file) and `<pkg>` is the study package directory from Step 1. Every `sherlock` command takes `--dir <pkg>` and prints one JSON object. Never edit files in `<pkg>/quiz-bank/` or `<pkg>/students/` by hand.
+
+### Adaptive rules
+
+- The person in the chat is the student. Ask for a nickname (3–32 lowercase letters, digits, or dashes), never a real name, then run `sherlock student new --dir <pkg> --nickname <nickname>`. Without a nickname, `sherlock student new --dir <pkg>` generates an ID.
+- Start every session with `nlm login --check` and `sherlock status --dir <pkg> --student <id>`. If login fails, tell the student to ask whoever set Sherlock up to run `nlm login`, and stop.
+- Only quiz answers change mastery. Record each answer with `sherlock record` and end each round with `sherlock close-round`.
+- `sherlock next` never includes correct answers. Do not reveal an answer before the student chooses; `sherlock record` returns the correct option afterwards for feedback.
+- Answer by question `type`: `--choice <index>` for `multiple_choice`, `--choices <i,j,...>` for `multiple_select` (every correct option, nothing else), and `--text "<answer>"` for `fill_in_the_blank`. Indexes are 0-based. Typed answers are marked but never stored.
+- If a `sherlock` command exits non-zero, read its one-line error, explain it plainly, and do not work around it by editing files.
+
+### Diagnose mode
+
+Use for a student's first session on a notebook.
+
+1. If `<pkg>/quiz-bank/bank.json` does not exist, run `sherlock bank init --dir <pkg> --notebook-id <notebook-id>`. Then register each of the ten concepts from `curriculum-analysis.md` (run Step 3 first if it is missing). The focus must be 1–5 words:
+
+   ```text
+   sherlock bank add-concept --dir <pkg> --slug organ-systems --name "Human Organ Systems (Coordination & Excretion)" --focus "Organ Systems" --rank 1
+   ```
+
+2. Tell the user how many quizzes will be generated (one per concept without a ready or pending quiz) and that this uses NotebookLM quota. Obtain approval. This is the only approval prompt in the adaptive modes; later top-ups are limited by the script's daily cap.
+3. For each concept by rank, one at a time:
+
+   ```text
+   sherlock bank request --dir <pkg> --concept <slug> --difficulty 3
+   <run the exact "command" it printed: nlm quiz create ... --confirm --json>
+   sherlock bank submitted --dir <pkg> --quiz <slot> --artifact-id <artifact_id from the nlm output>
+   ```
+
+   Submit sequentially; never background with `&`. If `nlm` errors, run `sherlock bank fail --dir <pkg> --quiz <slot> --reason "<error>"`.
+4. Rolling start: run `sherlock bank pending --dir <pkg>`, then check each pending quiz with `nlm studio status <notebook-id> --json --full --artifact-id <artifact-id>`. When one is `completed`:
+
+   ```text
+   nlm download quiz <notebook-id> --id <artifact-id> --format json --output <pkg>/quiz-bank/downloads/<slot>.json
+   sherlock bank import --dir <pkg> --quiz <slot> --file <pkg>/quiz-bank/downloads/<slot>.json
+   ```
+
+   Start quizzing as soon as the first concept is ready, and check the others between concepts.
+5. For each ready concept: `sherlock next --dir <pkg> --student <id> --concept <slug> --count 3 --mode diagnose`. Ask each question with its options, run `sherlock record --dir <pkg> --student <id> --concept <slug> --mode diagnose --question <question-id>` plus `--choice`, `--choices`, or `--text` for that question's type, give brief feedback, then `sherlock close-round --dir <pkg> --student <id> --concept <slug> --mode diagnose`.
+6. Finish with `sherlock status`: show each concept as mastered (green), partial (yellow), or weak (red).
+
+### Teach mode
+
+1. Run `sherlock status`. Take up to three concepts from `teach_queue`, in order.
+2. If a concept's `unseen_questions` is below 5 and its `quizzes_pending` is 0, request a top-up at the target difficulty (weak: 2, partial: 3) and submit it as in Diagnose step 3 before explaining.
+3. Explain the concept from the package files on disk (study guide, answer keys), aimed at its recorded `misconceptions` and avoiding strategies already in `explanations_tried`. Use `nlm notebook query` only when the package does not cover the concept. Record the strategy with `sherlock note --dir <pkg> --student <id> --concept <slug> --explanation <tag>` (for example `factory-analogy`). End with an unscored check-understanding question.
+4. Import the top-up if it has completed. Then run `sherlock next ... --count 5 --mode teach`, ask each question, `record` each answer, and `close-round`.
+5. If the concept is not mastered, try a different explanation and another round. `status` removes a concept from `teach_queue` after three teach rounds in one day; flag it for the next session.
+6. End with what improved, what still needs work, and the next review dates.
+
+### Tutor mode
+
+1. Answer the student's question from the package files, or with `nlm notebook query` when a cited curriculum answer is needed.
+2. Follow up with a check-understanding question. Never reveal answers to quiz-bank questions.
+3. Tutor mode never calls `record` or `close-round`. When the student shows a misconception, record it with `sherlock note --dir <pkg> --student <id> --concept <slug> --misconception "<one line, at most 120 characters>"` and suggest teach mode.
+
+### Review mode
+
+1. Run `sherlock due --dir <pkg> --student <id>` to list concepts due today.
+2. For each: `sherlock next ... --count 5 --mode review`, ask, `record`, then `close-round`. Review may repeat questions the student has seen before; that is intended.
+3. Show what passed, what returned to the teach queue, and the next review dates.
+
+### Adaptive failure handling
+
+| Situation | Do this |
+|---|---|
+| `next` returns fewer questions than asked (`shortfall` > 0) | Use what came back. Move to another concept and return later, or request a top-up. Tell the student what is happening. |
+| Studio status `unknown` | Keep polling until `minutes_pending` reaches 10; never submit a duplicate while one is pending. Then `sherlock bank fail`. |
+| Studio status `failed` | `sherlock bank fail`, then request once more. After a second failure, skip the concept for today. |
+| Rate limited (`code 8`) | `sherlock bank fail`, wait 5 minutes, then request again. The script allows 3 requests per concept per day. |
+| `bank import` fails validation | The quiz is marked failed and its questions are never shown. If the download was incomplete, download again and re-run `bank import`; no new generation is needed. Otherwise request another. |
+| `bank request` reports the daily cap | Continue with questions already in the bank and tell the student. |
+
 ## Output Structure
 
 ```text
@@ -216,7 +296,9 @@ study-packages/<safe-title>/
 ├── mind-map.json
 ├── infographic.png
 ├── answer-keys.md
-└── study-package-index.md
+├── study-package-index.md
+├── quiz-bank/              # adaptive modes: shared quiz bank (bank.json + normalized quizzes)
+└── students/               # adaptive modes: one progress file per student; never commit
 ```
 
 Only approved artifacts need to exist.
@@ -240,3 +322,4 @@ A run is complete only when:
 - Every requested artifact has a validation result.
 - No browser profile, cookie, secret, student record, or unapproved source appears in the output.
 - The final report distinguishes completed, failed, and skipped artifacts.
+- Adaptive sessions changed quiz-bank and student files only through `scripts/sherlock.py`.

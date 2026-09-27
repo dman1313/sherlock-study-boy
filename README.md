@@ -105,6 +105,24 @@ Output directory: ./study-packages/forces-review
 
 The agent will inspect sources and show the generation plan before issuing commands that create remote artifacts or consume NotebookLM quota.
 
+## Adaptive study modes
+
+Once a notebook has a curriculum analysis, Sherlock can tutor one student at a time:
+
+- **Diagnose:** a short quiz on every concept finds what the student already knows.
+- **Teach:** explains weak concepts, then quizzes until they are mastered.
+- **Tutor:** answers the student's own questions from the curriculum.
+- **Review:** brings mastered concepts back after 1, 2, 4, 8, 16, 30, then 60 days.
+
+NotebookLM writes the quiz questions, one focused quiz per concept. The bundled `scripts/sherlock.py` grades answers and keeps records in the study package directory.
+
+```text
+Use sherlock-study-boy in diagnose mode.
+Study package: ./study-packages/forces-review
+```
+
+The first diagnose on a notebook generates about ten quizzes and asks before doing so. After that, the script allows at most 20 quiz generations per day (set with `bank init --daily-cap`). Student progress stays in `students/` inside the study package directory; it is never uploaded or committed.
+
 ## Privacy and authentication
 
 - Keep curriculum files limited to material you are authorized to upload.

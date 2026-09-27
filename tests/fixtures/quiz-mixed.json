@@ -1,0 +1,68 @@
+{
+  "title": "Respiration Quiz",
+  "questions": [
+    {
+      "type": "multiple_choice",
+      "question": "Which gas is a product of aerobic respiration?",
+      "answerOptions": [
+        { "text": "Oxygen", "isCorrect": false, "rationale": "Oxygen is used, not produced." },
+        { "text": "Carbon dioxide", "isCorrect": true, "rationale": "Glucose is broken down to carbon dioxide and water." },
+        { "text": "Nitrogen", "isCorrect": false, "rationale": "Nitrogen is not involved." },
+        { "text": "Methane", "isCorrect": false, "rationale": "Methane is not a product." }
+      ],
+      "hint": "Think about what you breathe out."
+    },
+    {
+      "type": "multiple_select",
+      "question": "Which of these are products of anaerobic respiration in yeast?",
+      "answerOptions": [
+        { "text": "Ethanol", "isCorrect": true, "rationale": "Yeast produces ethanol." },
+        { "text": "Carbon dioxide", "isCorrect": true, "rationale": "Yeast releases carbon dioxide." },
+        { "text": "Lactic acid", "isCorrect": false, "rationale": "Lactic acid is made in muscles." },
+        { "text": "Energy", "isCorrect": true, "rationale": "Some energy is released." }
+      ],
+      "hasAllOfTheAbove": false,
+      "hasNoneOfTheAbove": false,
+      "hint": "There is more than one correct answer."
+    },
+    {
+      "type": "fill_in_the_blank",
+      "question": "After vigorous exercise, the extra oxygen needed to break down lactic acid is called the ____.",
+      "bestAnswer": "oxygen debt",
+      "acceptableAnswers": ["EPOC", "excess post-exercise oxygen consumption"],
+      "rationale": "Lactic acid is broken down using oxygen after exercise.",
+      "hint": "Two words."
+    },
+    {
+      "type": "fill_in_the_blank",
+      "question": "Aerobic respiration requires glucose and ____.",
+      "bestAnswer": "oxygen",
+      "acceptableAnswers": ["$O_2$"],
+      "hint": "A gas."
+    },
+    {
+      "type": "short_answer",
+      "question": "Explain why aerobic respiration releases more energy than anaerobic respiration.",
+      "grading": { "modelAnswer": "Glucose is completely broken down to carbon dioxide and water, releasing more energy." },
+      "hint": "Compare how completely glucose is broken down."
+    },
+    {
+      "type": "multiple_choice",
+      "question": "Which labelled part of the diagram is the mitochondrion?",
+      "answerOptions": [
+        { "text": "A", "isCorrect": true },
+        { "text": "B", "isCorrect": false }
+      ],
+      "imageUrls": ["https://example.invalid/diagram.png"]
+    },
+    {
+      "type": "multiple_choice",
+      "question": "Which organelle is the site of aerobic respiration?",
+      "answerOptions": [
+        { "text": "Mitochondrion", "isCorrect": true },
+        { "text": "Ribosome", "isCorrect": true },
+        { "text": "Nucleus", "isCorrect": false }
+      ]
+    }
+  ]
+}

@@ -40,25 +40,16 @@ Error: Unknown difficulty '3'. Valid options: easy, hard, medium                
 
 ## Quiz JSON format
 
-`nlm download quiz <notebook-id> --id <artifact-id> --format json` writes (per `nlm` 0.9.14's `core/download.py`):
+`nlm download quiz <notebook-id> --id <artifact-id> --format json` writes `{"title": ..., "questions": [...]}`. A live run on 2026-09-27 (NotebookLM via `nlm` 0.9.14) showed four question `type`s in one quiz, and more questions than `--count` asked for (12 for `--count 8`):
 
-```json
-{
-  "title": "Quiz title",
-  "questions": [
-    {
-      "question": "Question text",
-      "answerOptions": [
-        { "text": "Option A", "isCorrect": false },
-        { "text": "Option B", "isCorrect": true }
-      ],
-      "hint": "Optional hint"
-    }
-  ]
-}
-```
+| `type` | Fields | Correct answer |
+|---|---|---|
+| `multiple_choice` | `answerOptions[]` (`text`, `isCorrect`, `rationale`) | exactly one `isCorrect: true` |
+| `multiple_select` | `answerOptions[]`, `hasAllOfTheAbove`, `hasNoneOfTheAbove` | several `isCorrect: true` |
+| `fill_in_the_blank` | `bestAnswer`, `acceptableAnswers[]`, `rationale` | any accepted string; may contain LaTeX such as `$O_2$` |
+| `short_answer` | `grading.modelAnswer` | free text; needs a judge |
 
-The downloader passes NotebookLM's question objects through unchanged, so extra fields (for example a per-option `rationale`) may appear. Only `question`, `answerOptions[].text`, `answerOptions[].isCorrect`, and `hint` are confirmed. `nlm quiz create ... --json` prints `{"artifact_type": "quiz", "artifact_id": "...", "status": "in_progress", ...}`.
+Every question can also carry `question`, `hint`, and `imageUrls`. A question with `imageUrls` refers to a diagram a text-only student cannot see. `nlm` 0.9.14's own `core/download.py` only formats `question`, `answerOptions`, and `hint`, so older notes that list only those fields are incomplete. `nlm quiz create ... --json` prints `{"artifact_type": "quiz", "artifact_id": "...", "status": "unknown" | "in_progress", ...}`; the first status is often `unknown`.
 
 ## Focus phrases
 
