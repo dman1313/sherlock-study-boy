@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## [2.0.1] - 2026-09-27
+
+### Fixed
+- `SKILL.md` restored from 1.0.0. The 2.0.0 release had replaced it with a pre-1.0 draft
+  (VPS-only instructions, out-of-order steps, a real notebook ID, stale download formats,
+  and a link to a missing reference file).
+- The repository validator now scans only files git would commit, so Python's
+  `__pycache__` no longer trips the machine-specific-path check. CI passes for the first time.
+
+### Removed
+- The K3/Nebius adaptive-mode descriptions from 2.0.0. They were documented but never
+  implemented. Working adaptive modes arrive in 2.1.0.
+
 ## [2.0.0] - 2026-09-13
 
 ### Added
