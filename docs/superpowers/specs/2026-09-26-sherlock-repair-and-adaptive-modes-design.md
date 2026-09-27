@@ -47,6 +47,9 @@ Finish Sherlock Study Boy as a working agent skill in two milestones:
 | D6 | Records and schedule | As in §6.3–6.4 | Gentler one-rung-back on review failure |
 | D7 | Failures and quota | One approval for first bank fill; daily cap of 20 generations enforced by the script | Approval before every generation |
 | D8 | Done | CI green, tests pass, one live end-to-end run with a run log, both releases tagged | Tests only |
+| D9 | Other writers during the build | The Hermes SWF (software factory) profile, which made the earlier commits, is paused until v2.1.0 ships; the builder stops if `main` moves | Leave it running |
+| D10 | Where students use Sherlock | Hermes on this Mac (`~/.hermes/skills/research/`) | Hermes on the VPS; Claude app |
+| D11 | Keeping the Hermes copy current | Plain-file mirror after each release (no `.git`), backed up outside the skills directory | Git clone (would nest a repo inside the hermes-brain backup) |
 
 ## 5. Milestone 1 — Repair (v2.0.1)
 
@@ -75,7 +78,7 @@ This is v1's description unchanged. Milestone 2 changes it to `Turn curriculum i
 
 **R1.6 CI upkeep.** Update `actions/checkout` and `actions/setup-python` to current major versions that run on Node 24. Run tests on Python 3.10 and 3.12, matching the README's "Python 3.10+" claim.
 
-**R1.7 Stop the divergence (requires user approval, outside the repo).** Replace the Hermes-installed copy with a git clone of this repository, as the README already instructs, after backing up the existing directory. This prevents a future commit from being made against a stale copy again.
+**R1.7 Stop the divergence (outside the repo; the user chose this approach).** After each release, mirror the released files (without `.git`, tests, docs, or CI config) into `~/.hermes/skills/research/sherlock-study-boy`, after backing up the existing folder outside `~/.hermes/skills/` so Hermes does not load the backup as a duplicate skill. The folder stays a plain directory because the hermes-brain backups include it. Also pause the Hermes SWF profile for this repository during the build, since it authored 2.0.0 from the stale copy.
 
 ### Acceptance
 
@@ -335,7 +338,7 @@ Offline, standard-library `unittest`, run in CI on Python 3.10 and 3.12. No test
 
 - NotebookLM's private endpoints can change without notice, breaking `nlm`. Mitigation: pin guidance to a tested `nlm` version and keep the offline suite independent of it.
 - A student waits while the first bank fills. Mitigation: rolling start (§6.5 Diagnose step 4).
-- The Hermes install diverges again. Mitigation: R1.7.
+- The Hermes install diverges again, or an automated agent commits from a stale copy. Mitigation: R1.7 (plain mirror after each release, SWF paused, builder stops if `main` moves).
 
 ## 11. Changes made during implementation planning
 

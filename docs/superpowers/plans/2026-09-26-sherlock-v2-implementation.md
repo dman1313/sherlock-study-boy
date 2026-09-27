@@ -19,8 +19,22 @@
 - **`SKILL.md` frontmatter:** `description` is at most 60 characters and ends with a period. Headings that start `### ` followed by a digit are reserved for the nine procedure steps; a test requires them to be exactly 1–9.
 - **No NotebookLM calls** (`nlm ... create`, `source add`, `download`, `query`) except in Task 14, and only after the human approves. The test suite never calls `nlm`.
 - **Branch:** work on `sdd/v2-repair-and-adaptive-modes` until Task 5; Task 5 says what to use afterwards. Never push, open a pull request, tag, or merge without the human's explicit approval (Tasks 5 and 15 are human checkpoints).
-- **Stay in the repository.** Do not change files outside it, except where Task 5 or Task 14 says so, after approval.
+- **Stay in the repository.** Do not change files outside it, except: the study package directory in Task 14 (after approval), and the Hermes copy of the skill in Task 5 Step 7 and Task 15 Step 6 (the human chose plain-copy updates on 2026-09-27).
+- **Nothing else pushes to this repository during the build.** The human has paused the Hermes SWF (software factory) profile, which made the earlier commits. If `main` moves unexpectedly, stop and tell the human.
 - **Run every command from the repository root** (`sherlock-study-boy/`).
+
+## Before you start
+
+- [ ] Ask the human to confirm, word for word: "Is the Hermes SWF (software factory) profile paused for sherlock-study-boy?" Do not start until they say yes.
+- [ ] Check that `main` has not moved since this plan was written:
+
+```bash
+git fetch origin
+git rev-parse --short origin/main
+git branch --show-current
+```
+
+Expected: `61bf61d` and `sdd/v2-repair-and-adaptive-modes`. If `origin/main` is anything else, stop and tell the human that someone changed `main`.
 
 ## How to execute this plan
 
@@ -784,7 +798,14 @@ Expected: `VALIDATION PASSED`, `OK`, and no output from `git status --short`.
 
 Do nothing further until the human says yes.
 
-- [ ] **Step 3: On approval, push and open the pull request.**
+- [ ] **Step 3: On approval, push and open the pull request.** Before pushing, confirm nobody else has changed `main`:
+
+```bash
+git fetch origin
+git log --oneline HEAD..origin/main
+```
+
+Expected: no output. If it lists commits, stop and tell the human; do not push.
 
 ```bash
 git push -u origin sdd/v2-repair-and-adaptive-modes
@@ -805,19 +826,17 @@ git push origin v2.0.1
 git checkout -b sdd/v2.1-adaptive-modes
 ```
 
-- [ ] **Step 7 (optional; needs separate approval): replace the stale Hermes copy with a git clone.** Ask the human:
-
-> The Hermes-installed copy at ~/.hermes/skills/research/sherlock-study-boy is not a git checkout, which is how 2.0.0 was built from stale files. May I move it aside as a backup and replace it with a clone of this repository?
-
-On approval:
+- [ ] **Step 7: Update the Hermes copy of the skill with a plain copy (the human chose this).** Hermes on this Mac loads the skill from `~/.hermes/skills/research/sherlock-study-boy`. That folder is not a git checkout and is included in the human's hermes-brain backups, so keep it a plain folder: back it up **outside** `~/.hermes/skills/` (a backup inside it would load as a second skill with the same name), then mirror the released files into it. Run from the repository root right after Step 6; the new branch starts at the `v2.0.1` commit, so the files are the released ones:
 
 ```bash
-mv ~/.hermes/skills/research/sherlock-study-boy ~/.hermes/skills/research/sherlock-study-boy.bak-$(date +%Y%m%d)
-git clone https://github.com/dman1313/sherlock-study-boy.git ~/.hermes/skills/research/sherlock-study-boy
-git -C ~/.hermes/skills/research/sherlock-study-boy log --oneline -1
+git describe --tags --exact-match
+cp -R ~/.hermes/skills/research/sherlock-study-boy ~/sherlock-study-boy-hermes-backup-$(date +%Y%m%d)-v2.0.1
+rsync -a --delete --exclude .git --exclude .github --exclude __pycache__ --exclude docs --exclude tests --exclude .gitignore ./ ~/.hermes/skills/research/sherlock-study-boy/
+diff -rq --exclude=.git --exclude=.github --exclude=__pycache__ --exclude=docs --exclude=tests --exclude=.gitignore . ~/.hermes/skills/research/sherlock-study-boy && echo identical
+head -4 ~/.hermes/skills/research/sherlock-study-boy/SKILL.md
 ```
 
-Expected: the last command shows the merged `main` commit. Tell the human the backup's location.
+Expected: `git describe` prints `v2.0.1`; `diff` prints only `identical`; the `head` output includes `version: 2.0.1`. `--delete` removes files the release no longer has (the old `references/pipeline-v2-patterns.md` and the empty `web/` folder); the backup keeps them. If the backup folder name already exists, add a suffix such as `-2`. Tell the human where the backup is and to start a new Hermes session so the skill reloads.
 
 ---
 
@@ -3663,7 +3682,16 @@ Expected: `VALIDATION PASSED`, `OK`, and no output from `git status --short`.
 
 > Milestone 2 (v2.1.0 adaptive modes) is complete, the live run is logged in docs/runs/, and everything passes locally. May I push the branch and open a pull request into main?
 
-- [ ] **Step 3: On approval, push and open the pull request.** Use the current branch name (`git branch --show-current`):
+- [ ] **Step 3: On approval, push and open the pull request.** Before pushing, confirm nobody else has changed `main`:
+
+```bash
+git fetch origin
+git log --oneline HEAD..origin/main
+```
+
+Expected: no output. If it lists commits, stop and tell the human; do not push.
+
+Then push, using the current branch name:
 
 ```bash
 git push -u origin "$(git branch --show-current)"
@@ -3681,7 +3709,23 @@ git tag v2.1.0
 git push origin v2.1.0
 ```
 
-- [ ] **Step 6: If Task 5 Step 7 replaced the Hermes copy with a clone, update it:** `git -C ~/.hermes/skills/research/sherlock-study-boy pull`. Tell the human to start a new Hermes session so the skill reloads.
+- [ ] **Step 6: Update the Hermes copy of the skill (plain copy, as in Task 5 Step 7).** Run from the repository root, on `main` at the `v2.1.0` tag:
+
+```bash
+git describe --tags --exact-match
+cp -R ~/.hermes/skills/research/sherlock-study-boy ~/sherlock-study-boy-hermes-backup-$(date +%Y%m%d)-v2.1.0
+rsync -a --delete --exclude .git --exclude .github --exclude __pycache__ --exclude docs --exclude tests --exclude .gitignore ./ ~/.hermes/skills/research/sherlock-study-boy/
+diff -rq --exclude=.git --exclude=.github --exclude=__pycache__ --exclude=docs --exclude=tests --exclude=.gitignore . ~/.hermes/skills/research/sherlock-study-boy && echo identical
+head -4 ~/.hermes/skills/research/sherlock-study-boy/SKILL.md
+```
+
+Then check the script runs from the installed copy:
+
+```bash
+python3 ~/.hermes/skills/research/sherlock-study-boy/scripts/sherlock.py --help
+```
+
+Expected: `git describe` prints `v2.1.0`; `diff` prints only `identical`; the `head` output includes `version: 2.1.0`; `--help` prints a usage line starting `usage: sherlock.py`. Tell the human where the backup is and to start a new Hermes session so the skill reloads.
 
 ---
 
