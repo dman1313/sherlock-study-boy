@@ -185,6 +185,128 @@ def cmd_bank_quota(args: argparse.Namespace) -> dict:
     return {"today": today.isoformat(), **quota(bank, today)}
 
 
+# --- Quiz slots --------------------------------------------------------------
+
+
+def find_quiz(bank: dict, slot: str) -> dict:
+    for quiz in bank["quizzes"]:
+        if quiz["slot"] == slot:
+            return quiz
+    raise SherlockError(f"unknown quiz slot: {slot}")
+
+
+
+def cmd_bank_request(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    today = today_from(args)
+    bank = load_json(bank_file(pkg))
+    require_concept(bank, args.concept)
+    if not 1 <= args.difficulty <= 5:
+        raise SherlockError("--difficulty must be 1-5")
+    if args.count < 1:
+        raise SherlockError("--count must be at least 1")
+    usage = quota(bank, today)
+    if usage["remaining"] == 0:
+        raise SherlockError(
+            f"daily quiz cap reached ({usage['cap']}); use questions already in the bank"
+        )
+    concept_today = sum(
+        1
+        for quiz in bank["quizzes"]
+        if quiz["concept"] == args.concept and quiz["requested"] == today.isoformat()
+    )
+    if concept_today >= MAX_REQUESTS_PER_CONCEPT_PER_DAY:
+        raise SherlockError(
+            f"already requested {concept_today} quizzes for {args.concept} today; try again tomorrow"
+        )
+    number = 1 + sum(
+        1
+        for quiz in bank["quizzes"]
+        if quiz["concept"] == args.concept and quiz["difficulty"] == args.difficulty
+    )
+    slot = f"{args.concept}-d{args.difficulty}-{number}"
+    command = [
+        "nlm", "quiz", "create", bank["notebook_id"],
+        "--focus", bank["concepts"][args.concept]["focus"],
+        "--count", str(args.count),
+        "--difficulty", str(args.difficulty),
+        "--confirm", "--json",
+    ]
+    bank["quizzes"].append(
+        {
+            "slot": slot,
+            "concept": args.concept,
+            "difficulty": args.difficulty,
+            "count": args.count,
+            "status": "reserved",
+            "artifact_id": None,
+            "requested": today.isoformat(),
+            "submitted_at": None,
+            "file": f"quiz-bank/{slot}.json",
+            "question_count": 0,
+            "reason": None,
+        }
+    )
+    save_json(bank_file(pkg), bank)
+    return {
+        "slot": slot,
+        "command": command,
+        "command_line": shlex.join(command),
+        "quota": quota(bank, today),
+    }
+
+
+
+def cmd_bank_submitted(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    bank = load_json(bank_file(pkg))
+    quiz = find_quiz(bank, args.quiz)
+    if quiz["status"] != "reserved":
+        raise SherlockError(f"{args.quiz} is {quiz['status']}, expected reserved")
+    artifact_id = args.artifact_id.strip()
+    if not artifact_id:
+        raise SherlockError("--artifact-id must not be empty")
+    quiz.update(status="pending", artifact_id=artifact_id, submitted_at=now_utc().isoformat())
+    save_json(bank_file(pkg), bank)
+    return {"slot": args.quiz, "status": "pending", "artifact_id": artifact_id}
+
+
+
+def cmd_bank_pending(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    bank = load_json(bank_file(pkg))
+    now = now_utc()
+    pending = []
+    for quiz in bank["quizzes"]:
+        if quiz["status"] != "pending":
+            continue
+        submitted = dt.datetime.fromisoformat(quiz["submitted_at"])
+        pending.append(
+            {
+                "slot": quiz["slot"],
+                "concept": quiz["concept"],
+                "artifact_id": quiz["artifact_id"],
+                "minutes_pending": int((now - submitted).total_seconds() // 60),
+            }
+        )
+    return {"pending": pending}
+
+
+
+def cmd_bank_fail(args: argparse.Namespace) -> dict:
+    pkg = package_dir(args)
+    bank = load_json(bank_file(pkg))
+    quiz = find_quiz(bank, args.quiz)
+    if quiz["status"] not in ("reserved", "pending"):
+        raise SherlockError(f"{args.quiz} is {quiz['status']}; only reserved or pending quizzes can fail")
+    reason = " ".join(args.reason.split())
+    if not reason:
+        raise SherlockError("--reason must not be empty")
+    quiz.update(status="failed", reason=reason[:200])
+    save_json(bank_file(pkg), bank)
+    return {"slot": args.quiz, "status": "failed", "reason": quiz["reason"]}
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
@@ -221,6 +343,25 @@ def build_parser() -> ArgumentParser:
 
     p = actions.add_parser("quota", parents=[common], help="show today's quiz quota")
     p.set_defaults(handler=cmd_bank_quota)
+
+    p = actions.add_parser("request", parents=[common], help="reserve a quiz slot")
+    p.add_argument("--concept", required=True)
+    p.add_argument("--difficulty", type=int, required=True)
+    p.add_argument("--count", type=int, default=DEFAULT_QUIZ_COUNT)
+    p.set_defaults(handler=cmd_bank_request)
+
+    p = actions.add_parser("submitted", parents=[common], help="record a submitted quiz")
+    p.add_argument("--quiz", required=True)
+    p.add_argument("--artifact-id", required=True)
+    p.set_defaults(handler=cmd_bank_submitted)
+
+    p = actions.add_parser("pending", parents=[common], help="list quizzes being generated")
+    p.set_defaults(handler=cmd_bank_pending)
+
+    p = actions.add_parser("fail", parents=[common], help="mark a quiz as failed")
+    p.add_argument("--quiz", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(handler=cmd_bank_fail)
 
     return parser
 
