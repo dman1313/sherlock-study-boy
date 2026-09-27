@@ -12,6 +12,8 @@ notebooklm_browser_profile/
 study-packages/
 output/
 progress.json
+students/
+quiz-bank/
 *.mp4
 *.m4a
 *.pdf

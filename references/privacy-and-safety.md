@@ -34,6 +34,14 @@ Never commit:
 
 The repository validator checks several common leak patterns, but it is not a substitute for reviewing `git diff --staged` before a push.
 
+## Adaptive modes
+
+- Identify students by a random ID or a nickname they choose (3–32 lowercase letters, digits, or dashes). Never use a real name.
+- Student files in `<pkg>/students/` store option indexes, scores, dates, and one-line misconception notes written by the agent. Never store the student's own free-text words.
+- Nothing about students is sent to NotebookLM. Uploads stay curriculum-only.
+- `students/` and `quiz-bank/` are ignored by git. Do not commit or share them.
+- To delete a student's data, delete their file in `<pkg>/students/`.
+
 ## Incident response
 
 If a credential or private document is staged or committed:

@@ -19,6 +19,8 @@ REQUIRED_FILES = [
     ROOT / "references" / "privacy-and-safety.md",
     ROOT / "references" / "nlm-cli-quirks.md",
     ROOT / "references" / "pipeline-patterns.md",
+    ROOT / "references" / "adaptive-learning.md",
+    ROOT / "scripts" / "sherlock.py",
 ]
 
 FORBIDDEN_PATTERNS = {
