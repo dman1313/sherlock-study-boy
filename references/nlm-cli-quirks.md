@@ -1,6 +1,6 @@
 # NLM CLI Quirks
 
-Validated against `notebooklm-mcp-cli` / `nlm` 0.9.14. NotebookLM uses unofficial endpoints, so verify questionable syntax with `nlm <group> <command> --help`.
+Validated against `notebooklm-mcp-cli` / `nlm` 0.9.14. NotebookLM uses unofficial endpoints, so verify questionable syntax with `nlm <group> <command> --help`. Add new quirks here as they surface in real sessions.
 
 ## Current output formats
 
@@ -15,7 +15,14 @@ Validated against `notebooklm-mcp-cli` / `nlm` 0.9.14. NotebookLM uses unofficia
 | Mind map | `nlm download mind-map` | JSON |
 | Infographic | `nlm download infographic` | PNG |
 
-All specific artifact downloads use `--id <artifact-id>`. Do not pass the artifact ID positionally.
+All specific artifact downloads use `--id <artifact-id>`. Do not pass the artifact ID positionally:
+
+```text
+nlm download report <notebook-id> --id <artifact-id> --output study-guide.md   # correct
+nlm download report <notebook-id> <artifact-id> --output study-guide.md        # fails
+```
+
+The mind-map downloader is hyphenated (`mind-map`). `nlm studio status` can list a mind map with `type: "flashcards"`; if `nlm download mind-map` fails for that artifact, try `nlm download flashcards <notebook-id> --id <mind-map-artifact-id>`.
 
 ## Difficulty types differ
 
@@ -24,38 +31,94 @@ nlm flashcards create <notebook-id> --difficulty medium --confirm
 nlm quiz create <notebook-id> --difficulty 3 --confirm
 ```
 
-Flashcard difficulty is `easy`, `medium`, or `hard`. Quiz difficulty is an integer from 1 to 5.
+Flashcard difficulty is `easy`, `medium`, or `hard`. Quiz difficulty is an integer from 1 to 5. The wrong type fails with messages like:
+
+```text
+Error: Invalid value for '--difficulty' / '-d': 'medium' is not a valid integer.   # quiz given a word
+Error: Unknown difficulty '3'. Valid options: easy, hard, medium                     # flashcards given a number
+```
+
+## Quiz JSON format
+
+`nlm download quiz <notebook-id> --id <artifact-id> --format json` writes (per `nlm` 0.9.14's `core/download.py`):
+
+```json
+{
+  "title": "Quiz title",
+  "questions": [
+    {
+      "question": "Question text",
+      "answerOptions": [
+        { "text": "Option A", "isCorrect": false },
+        { "text": "Option B", "isCorrect": true }
+      ],
+      "hint": "Optional hint"
+    }
+  ]
+}
+```
+
+The downloader passes NotebookLM's question objects through unchanged, so extra fields (for example a per-option `rationale`) may appear. Only `question`, `answerOptions[].text`, `answerOptions[].isCorrect`, and `hint` are confirmed. `nlm quiz create ... --json` prints `{"artifact_type": "quiz", "artifact_id": "...", "status": "in_progress", ...}`.
 
 ## Focus phrases
 
-Use a short topic phrase for focused generations:
+Use a short topic phrase (two to five words) for focused generations:
 
 ```text
 --focus "Organ Systems"
 ```
 
-Long prompts and parenthetical curriculum-objective text have produced empty or failed artifacts. Keep the full concept label in the local manifest and a separate short `focus` value for CLI calls.
+Long prompts and parenthetical curriculum-objective text have produced empty or failed artifacts. In one real run, the focus "Human Organ Systems (Coordination & Excretion)" produced empty flashcards and videos stuck in `unknown`. Keep the full concept label and a separate short `focus` value:
+
+```json
+{ "rank": 9, "name": "Human Organ Systems (Coordination & Excretion)", "focus": "Organ Systems" }
+```
 
 ## Generation status
 
-- Poll with `nlm studio status <notebook-id> --json --full`.
-- Video may temporarily report `unknown`; wait 3–5 minutes before deciding it failed.
-- Slides can fail server-side and succeed on one retry.
-- Video/slides may return rate-limit error code 8. Stop after three bounded attempts.
+- Poll with `nlm studio status <notebook-id> --json --full`. For one artifact, add `--artifact-id <artifact-id>`.
+- Status values are `in_progress`, `completed`, `failed`, and `unknown`.
+- Video may temporarily report `unknown`; wait 3–5 minutes before deciding it failed. Do not download while status is `unknown`.
+- A video can move from `in_progress` to `failed` between polls. That is a real failure: resubmit, and record the new artifact ID, which differs from the old one.
+- Slides can fail server-side with no CLI error and succeed on one retry.
 - Audio can time out while server-side work continues; check studio status before resubmitting.
+
+## Rate limits
+
+Video and slides often hit:
+
+```text
+Error: Rate limited — API error (code 8): ...UserDisplayableError
+```
+
+Stop after three bounded attempts, move on to other artifacts, and come back later. On paid tiers the limit usually eases after 10–15 minutes; per-minute burst limits still apply.
+
+## Audio
+
+NotebookLM delivers AAC audio in an MP4 container, and the CLI refuses an `.mp3` output name:
+
+```text
+Error: NotebookLM delivers AAC audio in an MP4 container; cannot honor '.mp3' suffix.
+```
+
+Download as `.m4a`. If MP3 is required, transcode locally: `ffmpeg -i audio-overview.m4a -acodec libmp3lame -q:a 2 audio-overview.mp3`.
+
+`httpx.ReadTimeout` on `nlm audio create` is common on the first attempt; check studio status, then retry once. Paid tiers can produce two audio overviews (two `type: "audio"` entries); both are distinct and can be downloaded.
 
 ## Empty artifacts
 
 A successful download command does not prove useful content.
 
-- Flashcards and quizzes must parse as JSON and contain non-empty collections.
+- Flashcards and quizzes must parse as JSON and contain non-empty collections. Known empty stubs: 46 bytes (`[]`) and 79 bytes (`{"cards":[]}`, seen with long focus phrases). Treat any flashcard file under 200 bytes as suspect.
 - Markdown study guides should exceed 500 characters and differ from other focused guides.
 - Slides should have a PDF signature and exceed 100 KB.
 - Videos should have an MP4-compatible `ftyp` box and exceed 1 MB.
 
 ## Focused study guides
 
-Use `nlm notebook query` for concept-focused guides. `nlm report create --prompt` controls custom report instructions but is not a dependable topic filter across large notebooks.
+Use `nlm notebook query` for concept-focused guides. `nlm report create --prompt` controls custom report instructions but is not a dependable topic filter across large notebooks: in one real run, ten "focused" reports were byte-identical. Reports whose `custom_instructions` is `null` in studio status are generic and cannot be matched to a concept.
+
+`nlm notebook query <notebook-id> --json "<prompt>"` nests the answer at `.response.answer` or `.value.answer`. Queries can take 30–90 seconds; allow a 120-second timeout.
 
 ## Authentication
 
